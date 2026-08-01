@@ -57,14 +57,14 @@
 | 08 | ![Mobile Action](media/mobile/08-mobile-gameplay-action.png) | **Mobile Action** - Fast-paced gameplay on mobile |
 | 09 | ![Mobile Game Over](media/mobile/09-mobile-game-over.png) | **Mobile Game Over** - Results screen, ready for next round |
 
-### Gameplay Videos
+### Gameplay GIFs
 
-| Platform | Video | Duration |
-|----------|-------|----------|
-| **Desktop** | [▶ PC Gameplay (MP4)](media/pc/pc-gameplay.mp4) | ~60-90s continuous gameplay with 4 AI bots |
-| **Mobile** | [▶ Mobile Gameplay (MP4)](media/mobile/mobile-gameplay.mp4) | ~60-90s continuous gameplay with 4 AI bots |
+| Platform | Gameplay Preview |
+|----------|------------------|
+| **Desktop** | ![PC Gameplay](media/pc/pc-gameplay.gif) |
+| **Mobile** | ![Mobile Gameplay](media/mobile/mobile-gameplay.gif) |
 
-> **Note:** Videos show multiple rematch rounds in one session — round → game-over screen → ready-up → next round. Recorded with Playwright using survival-leaning bot personalities (balanced + 2 defensive + foodie).
+> **Note:** GIFs show multiple rematch rounds in one session — round → game-over screen → ready-up → next round. Recorded with Playwright using survival-leaning bot personalities (balanced + 2 defensive + foodie). *Original MP4 videos also available in media/ folders.*
 
 ---
 
