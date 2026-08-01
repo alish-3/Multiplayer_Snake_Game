@@ -96,7 +96,7 @@
             <contextPath>/</contextPath>
           </webApp>
           <httpConnector>
-            <port>8081</port>
+            <port>8080</port>
           </httpConnector>
           <scanIntervalSeconds>5</scanIntervalSeconds>
         </configuration>

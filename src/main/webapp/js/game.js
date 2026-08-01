@@ -80,6 +80,10 @@
     var swipeStartX = 0;
     var swipeStartY = 0;
 
+    // Message queue for when WebSocket is connecting
+    var wsMessageQueue = [];
+    var wsConnecting = false;
+
     // BUG 4: HUD row containers (values live in nested spans).
     var gameTimerEl = document.getElementById('gameTimer');
     var currentRankEl = document.getElementById('currentRank');
@@ -110,9 +114,8 @@
 
     function getWsUrl() {
         var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        var basePath = getBasePath();
-        return proto + '//' + window.location.host + basePath +
-            '/api/game/ws/' + encodeURIComponent(roomCode) + '/' + encodeURIComponent(playerName);
+        var port = '8080';
+        return proto + '//' + window.location.host + ':' + port + '/api/game/ws/' + encodeURIComponent(roomCode) + '/' + encodeURIComponent(playerName);
     }
 
     // ---------- settings + UI wiring (BUG 4) ----------
@@ -414,6 +417,7 @@
             try { ws.close(); } catch(e) {}
             ws = null;
         }
+        wsConnecting = true;
         var url = getWsUrl();
         console.log('Connecting to WebSocket:', url);
 
@@ -424,9 +428,15 @@
             console.log('WebSocket connected');
             connectionLost = false;
             reconnectAttempts = 0;
+            wsConnecting = false;
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
+            }
+            // Flush queued messages
+            while (wsMessageQueue.length > 0) {
+                var msg = wsMessageQueue.shift();
+                ws.send(JSON.stringify(msg));
             }
         };
 
@@ -450,6 +460,8 @@
         ws.onclose = function(e) {
             console.log('WebSocket closed:', e.code, e.reason);
             ws = null;
+            wsConnecting = false;
+            wsMessageQueue.length = 0; // Clear queue on close
             connectionLost = true;
             if (gameRunning) scheduleReconnect();
         };
@@ -457,6 +469,8 @@
         ws.onerror = function(e) {
             console.error('WebSocket error:', e);
             ws = null;
+            wsConnecting = false;
+            wsMessageQueue.length = 0; // Clear queue on error
             connectionLost = true;
         };
     }
@@ -486,6 +500,9 @@
     function sendToServer(msg) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
+        } else if (wsConnecting) {
+            // Queue message to send when connection opens
+            wsMessageQueue.push(msg);
         }
     }
 

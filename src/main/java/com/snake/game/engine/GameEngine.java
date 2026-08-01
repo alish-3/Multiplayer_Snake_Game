@@ -64,6 +64,7 @@ public class GameEngine {
             if (remaining <= 0) {
                 state.setCountdown(0);
                 state.setGameStarted(true);
+                GameWebSocket.broadcastState(room.getCode(), state);
             } else {
                 state.setCountdown(remaining);
                 GameWebSocket.broadcastState(room.getCode(), state);
