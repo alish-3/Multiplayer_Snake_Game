@@ -16,6 +16,12 @@ public class Snake {
     private long disconnectedSince;
     private static final long DISCONNECT_TIMEOUT = 10_000;
 
+    // Speed boost fields
+    private boolean speedBoostActive = false;
+    private long speedBoostEndTime = 0;
+    private float speedMultiplier = 1.0f;
+    private int growthPoints;
+
     public Snake() {
         this.segments = new ArrayList<>();
         this.score = 0;
@@ -25,6 +31,7 @@ public class Snake {
         this.nextDirection = "RIGHT";
         this.lastActivity = System.currentTimeMillis();
         this.disconnectedSince = 0;
+        this.growthPoints = 0;
     }
 
     public void touch() {
@@ -68,6 +75,8 @@ public class Snake {
     public void setNextDirection(String nextDirection) { this.nextDirection = nextDirection; }
     public int getScore() { return score; }
     public void setScore(int score) { this.score = score; }
+    public int getGrowthPoints() { return growthPoints; }
+    public void setGrowthPoints(int growthPoints) { this.growthPoints = growthPoints; }
     public boolean isAlive() { return alive; }
     public void setAlive(boolean alive) { this.alive = alive; }
     public boolean isReady() { return ready; }
@@ -85,12 +94,21 @@ public class Snake {
     public Point getNextHead() {
         Point head = getHead();
         if (head == null) return null;
+        int step = Math.round(speedMultiplier);
+        if (step < 1) step = 1;
         switch (direction) {
-            case "UP": return new Point(head.getX(), head.getY() - 1);
-            case "DOWN": return new Point(head.getX(), head.getY() + 1);
-            case "LEFT": return new Point(head.getX() - 1, head.getY());
-            case "RIGHT": return new Point(head.getX() + 1, head.getY());
-            default: return new Point(head.getX() + 1, head.getY());
+            case "UP": return new Point(head.getX(), head.getY() - step);
+            case "DOWN": return new Point(head.getX(), head.getY() + step);
+            case "LEFT": return new Point(head.getX() - step, head.getY());
+            case "RIGHT": return new Point(head.getX() + step, head.getY());
+            default: return new Point(head.getX() + step, head.getY());
         }
     }
+
+    public boolean isSpeedBoostActive() { return speedBoostActive; }
+    public void setSpeedBoostActive(boolean speedBoostActive) { this.speedBoostActive = speedBoostActive; }
+    public long getSpeedBoostEndTime() { return speedBoostEndTime; }
+    public void setSpeedBoostEndTime(long speedBoostEndTime) { this.speedBoostEndTime = speedBoostEndTime; }
+    public float getSpeedMultiplier() { return speedMultiplier; }
+    public void setSpeedMultiplier(float speedMultiplier) { this.speedMultiplier = speedMultiplier; }
 }

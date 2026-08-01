@@ -1,8 +1,12 @@
+# Build outputs
 target/
+dist/
+*.war
+*.class
+
+# Maven (keep wrapper, ignore local)
 !.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-.kotlin
+!.mvn/wrapper/maven-wrapper.properties
 
 ### IntelliJ IDEA ###
 .idea/modules.xml
@@ -12,8 +16,9 @@ target/
 *.iws
 *.iml
 *.ipr
+.idea/workspace.xml
 
-### Eclipse ###
+### Eclipse / NetBeans / VS Code ###
 .apt_generated
 .classpath
 .factorypath
@@ -21,34 +26,56 @@ target/
 .settings
 .springBeans
 .sts4-cache
-
-### NetBeans ###
 /nbproject/private/
 /nbbuild/
 /dist/
 /nbdist/
 /.nb-gradle/
 build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### VS Code ###
 .vscode/
 
 ### Mac OS ###
 .DS_Store
 
-# Build / deploy artifacts
-*.war
-*.class
-.smarttomcat/
-
-# IDE / OS
-.idea/workspace.xml
+# Local logs
 *.log
+jetty-run.log
+jetty.log
 
-# Browser test tooling (Playwright MCP captures)
+# Browser test tooling (Playwright MCP)
 .playwright-mcp/
 
-# Local git operations log (git manager state file)
+# Local git operations log
 git.md
+
+# Agent documentation
+AGENTS.md
+
+# ===== TEST INFRASTRUCTURE (EXCLUDED FROM REPO) =====
+# Node / Playwright
+node_modules/
+package-lock.json
+package.json
+tsconfig.json
+playwright.config.ts
+playwright.tickdebug.config.ts
+capture.config.ts
+playwright-report/
+test-results/
+
+# TypeScript bot source (test-only)
+src/bot.ts
+src/bot-controller.ts
+
+# Playwright tests
+tests/
+
+# Automation scripts & docs
+scripts/
+AUTOMATION_README.md
+run-screenshots.ps1
+add_bots.ps1
+join_bots.ps1
+
+# Loose temp screenshots
+ui-*.png

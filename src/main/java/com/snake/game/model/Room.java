@@ -11,6 +11,7 @@ public class Room {
     private boolean gameInProgress;
     private int maxPlayers;
     private long lastActivity;
+    private long gameOverTimestamp; // Time when game reached gameOver state
 
     public Room() {
         this.code = generateCode();
@@ -18,6 +19,7 @@ public class Room {
         this.gameInProgress = false;
         this.maxPlayers = 4;
         this.lastActivity = System.currentTimeMillis();
+        this.gameOverTimestamp = 0; // 0 means never went to gameOver
     }
 
     public Room(String code) {
@@ -49,6 +51,8 @@ public class Room {
     public void setGameInProgress(boolean gameInProgress) { this.gameInProgress = gameInProgress; }
     public int getMaxPlayers() { return maxPlayers; }
     public void setMaxPlayers(int maxPlayers) { this.maxPlayers = maxPlayers; }
+    public long getGameOverTimestamp() { return gameOverTimestamp; }
+    public void setGameOverTimestamp(long timestamp) { this.gameOverTimestamp = timestamp; }
 
     public int getPlayerCount() {
         return players.size();
@@ -82,6 +86,11 @@ public class Room {
     }
 
     public boolean canRestart() {
-        return !gameInProgress && gameState != null && gameState.isGameOver();
+        if (!gameInProgress && gameState != null && gameState.isGameOver()) {
+            // After game over, require 10 seconds before allowing restart
+            long now = System.currentTimeMillis();
+            return (now - gameOverTimestamp) >= 10000; // 10 seconds in milliseconds
+        }
+        return false;
     }
 }

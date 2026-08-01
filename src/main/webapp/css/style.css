@@ -781,6 +781,10 @@ html.swipe-mode .touch-dpad { display: none !important; }
 /* --- Guest bar --- */
 .guest-bar {
     position: fixed;
+    top: calc(56px + env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
     z-index: 85;
     background: rgba(233, 69, 96, 0.92);
     color: #fff;
@@ -1108,9 +1112,11 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .touch-ready-btn:active { transform: scale(0.96); }
 
     .guest-bar {
+        top: auto;
         left: 8px;
         right: 8px;
         bottom: calc(var(--controls-h, calc(var(--dpad-h) + var(--safe-bottom))) + 58px);
+        transform: none;
     }
 
     .game-toast { top: calc(56px + env(safe-area-inset-top)); }
@@ -1170,8 +1176,11 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .dpad-btn { width: 62px; height: 62px; font-size: 1.35em; border-radius: 14px; }
 
     .guest-bar {
+        top: calc(64px + env(safe-area-inset-top));
+        bottom: auto;
         left: 8px;
-        right: 200px;
+        right: auto;
+        transform: none;
         font-size: 0.72em;
         padding: 4px 8px;
     }

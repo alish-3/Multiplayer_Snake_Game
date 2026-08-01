@@ -144,7 +144,9 @@ public class RoomServlet extends HttpServlet {
         }
 
         Room room = roomManager.createRoom();
-        Snake snake = new Snake(playerName, color, new Point(5, 15));
+        Snake snake = new Snake(playerName, color, new Point(5, 5));
+        snake.setDirection("RIGHT");
+        snake.setNextDirection("RIGHT");
         synchronized (room) {
             room.getPlayers().add(snake);
         }
@@ -198,9 +200,26 @@ public class RoomServlet extends HttpServlet {
                 return;
             }
 
-            // Assign spawn position based on player count
-            int startX = 5 + room.getPlayerCount() * 6;
-            Snake snake = new Snake(playerName, color, new Point(startX, 15));
+            // Assign spawn position & direction based on 4-quadrant layout
+            int idx = room.getPlayerCount() % 4;
+            Point[] spawnHeads = { new Point(5, 5), new Point(24, 5), new Point(5, 24), new Point(24, 24) };
+            String[] spawnDirs = { "RIGHT", "LEFT", "RIGHT", "LEFT" };
+            
+            Point head = spawnHeads[idx];
+            String dir = spawnDirs[idx];
+            int dx = dir.equals("RIGHT") ? -1 : 1;
+
+            Snake snake = new Snake();
+            snake.setName(playerName);
+            snake.setColor(color);
+            snake.setDirection(dir);
+            snake.setNextDirection(dir);
+            List<Point> segs = new ArrayList<>();
+            segs.add(head);
+            segs.add(new Point(head.getX() + dx, head.getY()));
+            segs.add(new Point(head.getX() + 2 * dx, head.getY()));
+            snake.setSegments(segs);
+
             room.getPlayers().add(snake);
 
             if (room.getGameState() != null) {

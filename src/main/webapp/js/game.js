@@ -56,8 +56,9 @@
     var interpDuration = 120;
 
     var localDirection = 'RIGHT';
-    var serverFood = null;
+    var serverFoods = [];
     var serverSnakes = null;
+    var finalResult = null;  // server final snapshot at game over: { snakes, durationMs }
 
     var gridCache = null;
     var lastScoreboardHash = '';
@@ -364,10 +365,19 @@
         });
 
         document.addEventListener('keydown', handleKeyDown);
-        document.addEventListener('click', function initAudioOnce() {
-            initAudio();
-            document.removeEventListener('click', initAudioOnce);
-        }, { once: true });
+        
+        // Initialize audio on first user interaction (click OR keydown)
+        var audioInitDone = false;
+        function initAudioOnce() {
+            if (!audioInitDone) {
+                audioInitDone = true;
+                initAudio();
+                document.removeEventListener('click', initAudioOnce);
+                document.removeEventListener('keydown', initAudioOnce);
+            }
+        }
+        document.addEventListener('click', initAudioOnce, { once: true });
+        document.addEventListener('keydown', initAudioOnce, { once: true });
 
         var readyBtn = document.getElementById('touchReadyBtn');
         if (readyBtn) {
@@ -725,12 +735,22 @@
 
         connectionLost = false;
 
-        var prevFood = serverFood;
-        serverFood = data.food ? { x: data.food.x, y: data.food.y, type: data.food.type || 'NORMAL' } : null;
+        var prevFoods = serverFoods;
+        var foodsData = data.foods;
+        if (!foodsData && data.food) {
+            foodsData = [data.food];
+        }
+        serverFoods = foodsData ? foodsData.map(function(f) { return { x: f.x, y: f.y, type: f.type || 'NORMAL' }; }) : [];
         countdown = data.countdown;
         if (countdown === 0) countdown = -1;
 
         if (data.gameOver) {
+            // Server final snapshot for the game-over overlay; interpolation is
+            // cleared so the overlay can never merge stale frames.
+            finalResult = { snakes: data.snakes || null, durationMs: data.roundDurationMs || 0 };
+            prevState = null;
+            nextState = null;
+            interpStart = 0;
             gameOver = true;
             gameStarted = false;
             isReady = false;
@@ -739,13 +759,22 @@
                 if (my) saveScore(my.score || 0);
             }
             if (audioCtx) playBeep(200, 0.5, 'sawtooth', 0.06);
-        } else if (data.gameStarted) {
-            if (!gameStarted) {
-                startTime = Date.now(); // timer starts on round start (BUG 4: timer)
-                if (audioCtx) playBeep(660, 0.1, 'square', 0.06);
+        } else {
+            // New round / countdown / waiting payload: drop the previous
+            // game-over snapshot and clear any leftover round timer.
+            finalResult = null;
+            if (data.countdown >= 0) {
+                setText('timerVal', '0:00');
+                startTime = 0;
             }
-            gameOver = false;
-            gameStarted = true;
+            if (data.gameStarted) {
+                if (!gameStarted) {
+                    startTime = Date.now(); // timer starts on round start (BUG 4: timer)
+                    if (audioCtx) playBeep(660, 0.1, 'square', 0.06);
+                }
+                gameOver = false;
+                gameStarted = true;
+            }
         }
 
         if (data.snakes) {
@@ -770,9 +799,25 @@
             updateHud(data.snakes);
         }
 
-        if (prevFood && serverFood && (prevFood.x !== serverFood.x || prevFood.y !== serverFood.y)) {
-            spawnParticles(prevFood.x, prevFood.y, serverFood.type === 'GOLDEN' ? '#ffd700' : '#ff4444', 10, 50);
-            if (audioCtx) playBeep(serverFood.type === 'GOLDEN' ? 880 : 660, 0.08, 'square', 0.05);
+        if (prevFoods && serverFoods) {
+            var prevFoodKey = prevFoods.map(function(f) { return f.x + ',' + f.y; }).join(';');
+            var currFoodKey = serverFoods.map(function(f) { return f.x + ',' + f.y; }).join(';');
+            if (prevFoodKey !== currFoodKey) {
+                for (var i = 0; i < serverFoods.length; i++) {
+                    var food = serverFoods[i];
+                    var isNew = true;
+                    for (var j = 0; j < prevFoods.length; j++) {
+                        if (prevFoods[j].x === food.x && prevFoods[j].y === food.y) {
+                            isNew = false;
+                            break;
+                        }
+                    }
+                    if (isNew) {
+                        spawnParticles(food.x, food.y, food.type === 'GOLDEN' ? '#ffd700' : '#ff4444', 10, 50);
+                        if (audioCtx) playBeep(food.type === 'GOLDEN' ? 880 : 660, 0.08, 'square', 0.05);
+                    }
+                }
+            }
         }
     }
 
@@ -832,6 +877,13 @@
         if (!gameRunning) return;
         render(time);
         requestAnimationFrame(gameLoop);
+    }
+
+    function formatTime(ms) {
+        var s = Math.max(0, Math.floor((ms || 0) / 1000));
+        var mins = Math.floor(s / 60);
+        var secs = s % 60;
+        return mins + ':' + (secs < 10 ? '0' : '') + secs;
     }
 
     function render(time) {
@@ -968,29 +1020,32 @@
             }
         }
 
-        if (serverFood) {
+        if (serverFoods && serverFoods.length > 0) {
             var pulse = 1 + 0.08 * Math.sin(foodPulse * Math.PI * 2);
-            var fx = serverFood.x * CELL_SIZE + CELL_SIZE / 2;
-            var fy = serverFood.y * CELL_SIZE + CELL_SIZE / 2;
-            var fr = (CELL_SIZE / 2 - 2) * pulse;
-            var fColor = (serverFood.type === 'GOLDEN') ? '#ffd700' : '#ff4444';
-            var fGlow = (serverFood.type === 'GOLDEN') ? '#ffd700' : '#ff4444';
-            if (serverFood.type === 'GOLDEN') {
-                fr *= 1.15;
-            }
-            ctx.fillStyle = fColor;
-            ctx.shadowColor = fGlow;
-            ctx.shadowBlur = serverFood.type === 'GOLDEN' ? 16 : 8;
-            ctx.beginPath();
-            ctx.arc(fx, fy, fr, 0, Math.PI * 2);
-            ctx.fill();
-            if (serverFood.type === 'GOLDEN') {
-                ctx.fillStyle = 'rgba(255,215,0,0.3)';
+            for (var fi = 0; fi < serverFoods.length; fi++) {
+                var food = serverFoods[fi];
+                var fx = food.x * CELL_SIZE + CELL_SIZE / 2;
+                var fy = food.y * CELL_SIZE + CELL_SIZE / 2;
+                var fr = (CELL_SIZE / 2 - 2) * pulse;
+                var fColor = (food.type === 'GOLDEN') ? '#ffd700' : '#ff4444';
+                var fGlow = (food.type === 'GOLDEN') ? '#ffd700' : '#ff4444';
+                if (food.type === 'GOLDEN') {
+                    fr *= 1.15;
+                }
+                ctx.fillStyle = fColor;
+                ctx.shadowColor = fGlow;
+                ctx.shadowBlur = food.type === 'GOLDEN' ? 16 : 8;
                 ctx.beginPath();
-                ctx.arc(fx, fy, fr * 1.4, 0, Math.PI * 2);
+                ctx.arc(fx, fy, fr, 0, Math.PI * 2);
                 ctx.fill();
+                if (food.type === 'GOLDEN') {
+                    ctx.fillStyle = 'rgba(255,215,0,0.3)';
+                    ctx.beginPath();
+                    ctx.arc(fx, fy, fr * 1.4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.shadowBlur = 0;
             }
-            ctx.shadowBlur = 0;
         }
 
         updateParticles();
@@ -1014,14 +1069,19 @@
         } else if (gameOver) {
             ctx.fillStyle = 'rgba(0,0,0,0.65)';
             ctx.fillRect(0, 0, w, h);
-            var sorted = serverSnakes ? serverSnakes.slice().sort(function(a, b) { return (b.score || 0) - (a.score || 0); }) : [];
-            var my = serverSnakes ? findMySnake(serverSnakes) : null;
+            var snapshotSnakes = finalResult && finalResult.snakes ? finalResult.snakes : serverSnakes;
+            var sorted = snapshotSnakes ? snapshotSnakes.slice().sort(function(a, b) { return (b.score || 0) - (a.score || 0); }) : [];
+            var my = snapshotSnakes ? findMySnake(snapshotSnakes) : null;
 
             ctx.fillStyle = '#ffd700';
             ctx.font = 'bold 28px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('GAME OVER', w / 2, h / 2 - 80);
+
+            ctx.fillStyle = '#aaa';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('Time: ' + formatTime(finalResult ? finalResult.durationMs : 0), w / 2, h / 2 - 104);
 
             var rankY = h / 2 - 46;
             for (var ri = 0; ri < Math.min(sorted.length, 4); ri++) {
@@ -1044,11 +1104,6 @@
                 ctx.fillText('Ready! Waiting for others...', w / 2, rankY);
                 rankY += 24;
             }
-            if (isGuest) {
-                ctx.fillStyle = 'rgba(233, 69, 96, 0.6)';
-                ctx.font = '12px sans-serif';
-                ctx.fillText('Guest - data not saved', w / 2, rankY);
-            }
         } else if (!gameStarted) {
             ctx.fillStyle = 'rgba(0,0,0,0.5)';
             ctx.fillRect(0, 0, w, h);
@@ -1065,18 +1120,14 @@
             ctx.fillStyle = '#ddd';
             ctx.font = '16px sans-serif';
             ctx.fillText(isMobile ? 'Tap READY when ready' : 'Press SPACE when ready', w / 2, h / 2 + 38);
+            // Single status line: text and color swap with ready state (never two lines)
+            ctx.font = '15px sans-serif';
             if (isReady) {
                 ctx.fillStyle = '#16a34a';
                 ctx.fillText('Ready! Waiting for others...', w / 2, h / 2 + 72);
             } else {
-                ctx.fillStyle = '#aaa';
-                ctx.font = '14px sans-serif';
-                ctx.fillText('Not ready yet', w / 2, h / 2 + 100);
-            }
-            if (isGuest) {
-                ctx.fillStyle = 'rgba(233, 69, 96, 0.5)';
-                ctx.font = '13px sans-serif';
-                ctx.fillText('Guest - data not saved', w / 2, h / 2 + 128);
+                ctx.fillStyle = '#a8a8b3';
+                ctx.fillText('Not ready yet', w / 2, h / 2 + 72);
             }
         }
     }
@@ -1163,6 +1214,9 @@
     function initAudio() {
         try {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
         } catch (e) {}
     }
 

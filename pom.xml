@@ -56,6 +56,13 @@
       <artifactId>jbcrypt</artifactId>
       <version>0.4</version>
     </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -73,6 +80,25 @@
         <configuration>
           <source>17</source>
           <target>17</target>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+      <plugin>
+        <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-maven-plugin</artifactId>
+        <version>11.0.20</version>
+        <configuration>
+          <webApp>
+            <contextPath>/</contextPath>
+          </webApp>
+          <httpConnector>
+            <port>8081</port>
+          </httpConnector>
+          <scanIntervalSeconds>5</scanIntervalSeconds>
         </configuration>
       </plugin>
     </plugins>
