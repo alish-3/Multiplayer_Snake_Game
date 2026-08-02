@@ -256,6 +256,15 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 | **Video capture timing** — Recording started too early (blank lead-in) | `tests/capture-media.spec.ts` | Game page opens right after ready-up so recordings start with countdown |
 | **Bot personalities** — All bots aggressive → short rounds | `tests/capture-media.spec.ts` | Survival-leaning mix: balanced + 2 defensive + foodie via `createCustomBotRoom` |
 
+### ✅ Fixed (2026-08-02)
+
+| Issue | File | Fix |
+|-------|------|-----|
+| **Leaderboard timer stuck at 0:00** — `if (data.countdown >= 0)` reset `startTime = 0` on every tick after countdown ended (server sends `countdown: 0` continuously when `gameStarted=true`) | `game.js` (line 841) & `js/game.js` (line 834) | Changed to `if (data.countdown > 0)` — timer only resets during actual countdown (3,2,1), not during gameplay transition (0) |
+| **Unused bot classes** — `BotAdder`, `AdvancedBotAdder`, `PerfectBotManager` not imported anywhere | `util/` | Deleted 3 unused files |
+| **Duplicate `js/` folder** — Identical copy of `src/main/webapp/js/` at repo root | Root | Deleted duplicate folder |
+| **.gitignore cleanup** — Added ignores for `.smarttomcat/`, debug/playtest/verify screenshots, screenshot logs | `.gitignore` | Prevents IDE/temp files from being committed |
+
 ### 🔧 In Progress / Planned
 
 | Area | Description | Priority |
@@ -282,6 +291,8 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 - [x] **AI Bots** — 5 personalities, TypeScript, Playwright integration
 - [x] **Media Capture** — 18 screenshots (9 PC + 9 mobile) + 2 gameplay videos
 - [x] **Critical Bug Fixes** — Game-freeze NPE, initial food, video timing, bot personalities
+- [x] **Leaderboard timer fix** — Timer no longer stuck at 0:00 during gameplay
+- [x] **Code cleanup** — Removed unused bot classes, duplicate js/ folder, improved .gitignore
 
 ### 🎯 Next Milestones
 
@@ -318,5 +329,5 @@ MIT License — feel free to use, modify, and distribute.
 
 ---
 
-*Last updated: August 1, 2026*  
+*Last updated: August 2, 2026*  
 *Status: Actively maintained — bugs are tracked, fixed, and verified. Committed to making this as bug-free as possible.*
