@@ -12,6 +12,11 @@ public class Room {
     private int maxPlayers;
     private long lastActivity;
     private long gameOverTimestamp; // Time when game reached gameOver state
+    
+    // Bot game mode fields
+    private String gameMode; // "friends" or "bots"
+    private int botCount; // Number of bots to add (0-3)
+    private String botDifficulty; // "easy", "normal", "hard", "impossible"
 
     public Room() {
         this.code = generateCode();
@@ -20,6 +25,9 @@ public class Room {
         this.maxPlayers = 4;
         this.lastActivity = System.currentTimeMillis();
         this.gameOverTimestamp = 0; // 0 means never went to gameOver
+        this.gameMode = "friends"; // default
+        this.botCount = 0;
+        this.botDifficulty = "normal"; // default
     }
 
     public Room(String code) {
@@ -53,6 +61,14 @@ public class Room {
     public void setMaxPlayers(int maxPlayers) { this.maxPlayers = maxPlayers; }
     public long getGameOverTimestamp() { return gameOverTimestamp; }
     public void setGameOverTimestamp(long timestamp) { this.gameOverTimestamp = timestamp; }
+    
+    // Bot game mode getters/setters
+    public String getGameMode() { return gameMode; }
+    public void setGameMode(String gameMode) { this.gameMode = gameMode; }
+    public int getBotCount() { return botCount; }
+    public void setBotCount(int botCount) { this.botCount = botCount; }
+    public String getBotDifficulty() { return botDifficulty; }
+    public void setBotDifficulty(String botDifficulty) { this.botDifficulty = botDifficulty; }
 
     public int getPlayerCount() {
         return players.size();

@@ -7,6 +7,7 @@ import com.snake.game.engine.RoomManager;
 import com.snake.game.model.GameState;
 import com.snake.game.model.Room;
 import com.snake.game.model.Snake;
+import com.snake.game.util.BotManager;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -89,6 +90,9 @@ public class GameServlet extends HttpServlet {
             case "move":
                 handleMove(json, room, resp);
                 break;
+            case "boost":
+                handleBoost(json, room, resp);
+                break;
             case "ready":
                 handleReady(room, playerName, resp);
                 break;
@@ -163,8 +167,34 @@ public class GameServlet extends HttpServlet {
         resp.getWriter().write(gson.toJson(Map.of("success", true)));
     }
 
+    private void handleBoost(JsonObject json, Room room, HttpServletResponse resp) throws IOException {
+        String playerName = json.has("playerName") && !json.get("playerName").isJsonNull() ? json.get("playerName").getAsString() : null;
+        boolean boosting = json.has("boost") && !json.get("boost").isJsonNull() && json.get("boost").getAsBoolean();
+        if (playerName == null) {
+            resp.getWriter().write(gson.toJson(Map.of("success", false)));
+            return;
+        }
+        Snake snake = room.getPlayer(playerName);
+        if (snake == null) {
+            resp.getWriter().write(gson.toJson(Map.of("success", false)));
+            return;
+        }
+        snake.touch();
+        if (snake.isAlive()) {
+            snake.setBoosting(boosting);
+        }
+        resp.getWriter().write(gson.toJson(Map.of("success", true)));
+    }
+
     private void handleReady(Room room, String playerName, HttpServletResponse resp) throws IOException {
         synchronized (room) {
+            // Ignore ready requests while a round is running/counting down (same
+            // rationale as GameWebSocket.handleReady: keeps ready flags clean).
+            if (room.isGameInProgress()) {
+                System.out.println("[ReadyDebug] HTTP BLOCKED gameInProgress=true code=" + room.getCode() + " player=" + playerName);
+                resp.getWriter().write(gson.toJson(Map.of("success", true)));
+                return;
+            }
             Snake snake = room.getPlayer(playerName);
             if (snake == null) {
                 resp.getWriter().write(gson.toJson(Map.of("success", false, "error", "Player not found")));
@@ -174,11 +204,9 @@ public class GameServlet extends HttpServlet {
             snake.setReady(true);
 
             room.removeDisconnectedPlayers();
-            boolean shouldStart = !room.isGameInProgress() && room.allPlayersReady();
-            if (shouldStart) {
-                if (room.canRestart()) {
-                    room.getGameState().setGameOver(false);
-                }
+            boolean allReady = room.allPlayersReady();
+            System.out.println("[ReadyDebug] HTTP code=" + room.getCode() + " player=" + playerName + " ready=true allReady=" + allReady);
+            if (allReady) {
                 GameEngine.resetGame(room);
                 GameEngine.startGame(room);
             }
@@ -190,6 +218,12 @@ public class GameServlet extends HttpServlet {
     private void handleLeave(Room room, String playerName, HttpServletResponse resp) throws IOException {
         synchronized (room) {
             room.removePlayer(playerName);
+            // If only bots remain, no humans are watching - tear the room down
+            if (BotManager.hasOnlyBots(room)) {
+                BotManager.removeBots(room);
+                GameEngine.stopGame(room.getCode());
+                roomManager.removeRoom(room.getCode());
+            }
         }
 
         if (room.getPlayerCount() == 0) {

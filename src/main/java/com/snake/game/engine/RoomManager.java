@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 public class RoomManager {
     private static final RoomManager INSTANCE = new RoomManager();
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
-    private static final long STALE_TIMEOUT_MS = 30_000;
+    private static final long STALE_TIMEOUT_MS = 300_000;
     private static final long CLEANUP_INTERVAL_MS = 10_000;
     private final ScheduledExecutorService cleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "room-cleanup");

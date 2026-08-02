@@ -12,6 +12,7 @@
     <maven.compiler.source>17</maven.compiler.source>
     <maven.compiler.target>17</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <jetty.port>8080</jetty.port>
   </properties>
 
   <dependencies>
@@ -96,7 +97,7 @@
             <contextPath>/</contextPath>
           </webApp>
           <httpConnector>
-            <port>8080</port>
+            <port>${jetty.port}</port>
           </httpConnector>
           <scanIntervalSeconds>5</scanIntervalSeconds>
         </configuration>

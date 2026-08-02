@@ -22,6 +22,12 @@ public class Snake {
     private float speedMultiplier = 1.0f;
     private int growthPoints;
 
+    // Hybrid (.io style) fields
+    private boolean bot = false;
+    private boolean boosting = false;
+    private String botDifficulty = "normal";
+    private String botStrategy = "balanced";
+
     public Snake() {
         this.segments = new ArrayList<>();
         this.score = 0;
@@ -111,4 +117,12 @@ public class Snake {
     public void setSpeedBoostEndTime(long speedBoostEndTime) { this.speedBoostEndTime = speedBoostEndTime; }
     public float getSpeedMultiplier() { return speedMultiplier; }
     public void setSpeedMultiplier(float speedMultiplier) { this.speedMultiplier = speedMultiplier; }
+    public boolean isBot() { return bot; }
+    public void setBot(boolean bot) { this.bot = bot; }
+    public boolean isBoosting() { return boosting; }
+    public void setBoosting(boolean boosting) { this.boosting = boosting; }
+    public String getBotDifficulty() { return botDifficulty; }
+    public void setBotDifficulty(String botDifficulty) { this.botDifficulty = botDifficulty; }
+    public String getBotStrategy() { return botStrategy; }
+    public void setBotStrategy(String botStrategy) { this.botStrategy = botStrategy; }
 }

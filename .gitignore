@@ -79,3 +79,17 @@ join_bots.ps1
 
 # Loose temp screenshots
 ui-*.png
+
+# IntelliJ Smart Tomcat plugin
+.smarttomcat/
+
+# Debug/playtest screenshots
+debug-*.png
+playtest-*.png
+verify-*.png
+
+# Screenshot logs
+screenshot-*.txt
+
+# Duplicate root js folder (use src/main/webapp/js/ instead)
+js/

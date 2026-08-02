@@ -80,6 +80,14 @@
     var swipeStartX = 0;
     var swipeStartY = 0;
 
+    var countdownBuffers = { 3: null, 2: null, 1: null, gameover: null };
+    var countdownSoundsPlayed = { 3: false, 2: false, 1: false };
+    var soundsLoading = 0;
+    var lastCountdownValue = -1;
+    var lastPlayTime = { 3: 0, 2: 0, 1: 0 };
+    var wasGameOver = false;
+    var lastCountdownPlayTime = 0;
+
     // Message queue for when WebSocket is connecting
     var wsMessageQueue = [];
     var wsConnecting = false;
@@ -114,8 +122,7 @@
 
     function getWsUrl() {
         var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        var port = '8080';
-        return proto + '//' + window.location.host + ':' + port + '/api/game/ws/' + encodeURIComponent(roomCode) + '/' + encodeURIComponent(playerName);
+        return proto + '//' + window.location.host + getBasePath() + '/api/game/ws/' + encodeURIComponent(roomCode) + '/' + encodeURIComponent(playerName);
     }
 
     // ---------- settings + UI wiring (BUG 4) ----------
@@ -350,6 +357,8 @@
         }
         syncSettingsUI();
         wireUi();
+        initAudio();
+        loadGameSounds();
 
         Ajax.post('api/game', {
             action: 'join',
@@ -368,6 +377,7 @@
         });
 
         document.addEventListener('keydown', handleKeyDown);
+        document.addEventListener('keyup', handleKeyUp);
         
         // Initialize audio on first user interaction (click OR keydown)
         var audioInitDone = false;
@@ -389,6 +399,18 @@
                 e.preventDefault();
                 sendReady();
             }, { passive: false });
+        }
+
+        var boostBtn = document.getElementById('boostBtn');
+        if (boostBtn) {
+            var boostOn = function(e) { e.preventDefault(); setBoost(true); };
+            var boostOff = function(e) { e.preventDefault(); setBoost(false); };
+            boostBtn.addEventListener('touchstart', boostOn, { passive: false });
+            boostBtn.addEventListener('touchend', boostOff, { passive: false });
+            boostBtn.addEventListener('touchcancel', boostOff, { passive: false });
+            boostBtn.addEventListener('mousedown', boostOn);
+            boostBtn.addEventListener('mouseup', boostOff);
+            boostBtn.addEventListener('mouseleave', boostOff);
         }
         document.addEventListener('touchmove', function(e) {
             if (e.target === canvas || (canvas && canvas.contains(e.target)) || e.target === swipeArea) {
@@ -527,6 +549,10 @@
         sendToServer({ action: 'move', direction: dir });
     }
 
+    function setBoost(on) {
+        sendToServer({ action: 'boost', boost: on });
+    }
+
     function handleKeyDown(e) {
         if (e.key === 'Escape') {
             closeSettingsModal();
@@ -534,7 +560,12 @@
         }
         if (e.repeat) return;
         var key = e.key;
-        if (key === ' ' || key === 'Space' || key === 'Spacebar') {
+        if (key === ' ' || key === 'Space' || key === 'Spacebar' || key === 'Shift') {
+            e.preventDefault();
+            setBoost(true);
+            return;
+        }
+        if (key === 'Enter') {
             e.preventDefault();
             sendReady();
             return;
@@ -549,6 +580,14 @@
         if (!dir) return;
         e.preventDefault();
         sendDirection(dir);
+    }
+
+    function handleKeyUp(e) {
+        var key = e.key;
+        if (key === ' ' || key === 'Space' || key === 'Spacebar' || key === 'Shift') {
+            e.preventDefault();
+            setBoost(false);
+        }
     }
 
     // ---------- touch controls (swipe + dpad) ----------
@@ -759,6 +798,19 @@
         }
         serverFoods = foodsData ? foodsData.map(function(f) { return { x: f.x, y: f.y, type: f.type || 'NORMAL' }; }) : [];
         countdown = data.countdown;
+
+        console.log('[Sound] Received countdown:', countdown, 'gameStarted:', data.gameStarted, 'lastCountdownValue:', lastCountdownValue);
+
+        // Play countdown sounds (3, 2, 1) - only when value changes to prevent duplicates
+        if (countdown !== lastCountdownValue) {
+            if (countdown >= 1 && countdown <= 3 && !countdownSoundsPlayed[countdown]) {
+                console.log('[Sound] Playing countdown:', countdown);
+                playCountdownSound(countdown);
+                countdownSoundsPlayed[countdown] = true;
+            }
+            lastCountdownValue = countdown;
+        }
+
         if (countdown === 0) countdown = -1;
 
         if (data.gameOver) {
@@ -776,11 +828,17 @@
                 if (my) saveScore(my.score || 0);
             }
             if (audioCtx) playBeep(200, 0.5, 'sawtooth', 0.06);
+            // Only play game over sound on transition from not gameOver to gameOver
+            if (!wasGameOver) {
+                playGameOverSound();
+            }
+            wasGameOver = true;
         } else {
+            wasGameOver = false;
             // New round / countdown / waiting payload: drop the previous
             // game-over snapshot and clear any leftover round timer.
             finalResult = null;
-            if (data.countdown >= 0) {
+            if (data.countdown > 0) {
                 setText('timerVal', '0:00');
                 startTime = 0;
             }
@@ -788,6 +846,11 @@
                 if (!gameStarted) {
                     startTime = Date.now(); // timer starts on round start (BUG 4: timer)
                     if (audioCtx) playBeep(660, 0.1, 'square', 0.06);
+                    // Only reset countdown if a NEW countdown is starting (countdown > 0)
+                    // If countdown is 0 or -1, game is already in progress (reconnect with stale state)
+                    if (data.countdown > 0) {
+                        resetCountdownSounds();
+                    }
                 }
                 gameOver = false;
                 gameStarted = true;
@@ -1252,6 +1315,99 @@
             osc.start();
             osc.stop(audioCtx.currentTime + duration);
         } catch (e) {}
+    }
+
+    var countdownBuffers = { 3: null, 2: null, 1: null, gameover: null };
+    var soundsLoading = 0;
+
+    function loadGameSounds() {
+        var basePath = getBasePath() + '/sounds/';
+        console.log('[Sound] Loading sounds from:', basePath);
+        
+        var files = {
+            3: 'countdown.ogg',
+            2: 'countdown.ogg',
+            1: 'countdown.ogg',
+            gameover: 'gameover.wav'
+        };
+        
+        soundsLoading = Object.keys(files).length;
+        
+        Object.keys(files).forEach(function(key) {
+            var url = basePath + files[key];
+            fetch(url)
+                .then(function(response) { return response.arrayBuffer(); })
+                .then(function(arrayBuffer) { return audioCtx.decodeAudioData(arrayBuffer); })
+                .then(function(audioBuffer) {
+                    countdownBuffers[key] = audioBuffer;
+                    console.log('[Sound] ' + key + ' loaded OK');
+                    soundsLoading--;
+                })
+                .catch(function(e) { 
+                    console.log('[Sound] ' + key + ' load error:', e); 
+                    soundsLoading--;
+                });
+        });
+    }
+
+    function playCountdownSound(num) {
+        if (!soundEnabled || !audioCtx) { console.log('[Sound] playCountdownSound skipped - disabled or no audioCtx'); return; }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        var buffer = countdownBuffers[num];
+        if (!buffer) { console.log('[Sound] No buffer for:', num, '(loading:', soundsLoading + ')'); return; }
+        
+        // Prevent double-play within 500ms (safety net for server double-broadcast)
+        var now = Date.now();
+        if (now - (lastPlayTime[num] || 0) < 500) {
+            console.log('[Sound] Skipping', num, '- played too recently (per-sound)');
+            return;
+        }
+        // Global cooldown: prevent ANY countdown sound within 300ms of previous
+        if (now - lastCountdownPlayTime < 300) {
+            console.log('[Sound] Skipping', num, '- global countdown cooldown');
+            return;
+        }
+        
+        try {
+            console.log('[Sound] Playing countdown:', num);
+            var source = audioCtx.createBufferSource();
+            var gain = audioCtx.createGain();
+            source.buffer = buffer;
+            gain.gain.value = (num === 'go') ? 0.6 : 0.5;
+            source.connect(gain);
+            gain.connect(audioCtx.destination);
+            source.start(0);
+            lastPlayTime[num] = now;
+            lastCountdownPlayTime = now;
+        } catch (e) { console.log('[Sound] Error playing', num, ':', e); }
+    }
+
+    function playGameOverSound() {
+        if (!soundEnabled || !audioCtx) { console.log('[Sound] playGameOverSound skipped'); return; }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        var buffer = countdownBuffers.gameover;
+        if (!buffer) { console.log('[Sound] No gameover buffer'); return; }
+        
+        try {
+            console.log('[Sound] Playing game over');
+            var source = audioCtx.createBufferSource();
+            var gain = audioCtx.createGain();
+            source.buffer = buffer;
+            gain.gain.value = 0.5;
+            source.connect(gain);
+            gain.connect(audioCtx.destination);
+            source.start(0);
+        } catch (e) { console.log('[Sound] Game over error:', e); }
+    }
+
+    function resetCountdownSounds() {
+        countdownSoundsPlayed = { 3: false, 2: false, 1: false };
+        lastCountdownValue = -1;
+        lastPlayTime = { 3: 0, 2: 0, 1: 0 };
+        wasGameOver = false;
+        lastCountdownPlayTime = 0;
     }
 
     // ---------- particles ----------

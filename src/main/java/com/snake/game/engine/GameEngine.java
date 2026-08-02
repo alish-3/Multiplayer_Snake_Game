@@ -2,6 +2,7 @@ package com.snake.game.engine;
 
 import com.snake.game.model.*;
 import com.snake.game.servlet.GameWebSocket;
+import com.snake.game.util.AdvancedBotManager;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -11,18 +12,22 @@ public class GameEngine {
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
     private static final Map<String, ScheduledFuture<?>> activeGames = new ConcurrentHashMap<>();
     private static final Map<String, Long> gameStartTimes = new ConcurrentHashMap<>();
-    private static final Map<String, List<Point>> lastConsumedPositions = new ConcurrentHashMap<>();
     private static final Map<String, Long> growthTimers = new ConcurrentHashMap<>();
     private static final Map<String, Map<String, Long>> lastScoreMilestoneCheck = new ConcurrentHashMap<>();
-    private static final Map<String, Long> lastFoodEatenTime = new ConcurrentHashMap<>();
-    private static final Map<String, Boolean> speedBoostAvailable = new ConcurrentHashMap<>();
-    private static final Map<String, Long> gameOverTimestamps = new ConcurrentHashMap<>();
-    private static final int GROWTH_GATE_SCORE = 100;   // past this score, growth is gated
-    private static final int GROWTH_SEGMENT_INTERVAL = 4; // past the gate, grow every 4th food point
     private static final boolean TICK_DEBUG = System.getenv("SNAKE_TICK_DEBUG") != null || Boolean.getBoolean("snake.tickDebug");
 
+    // Hybrid (.io style) constants
+    private static final float BOOST_SPEED_MULTIPLIER = 2.0f;
+    private static final int BOOST_MIN_LENGTH = 5;       // cannot boost below this many segments
+    private static final int BOOST_SHED_INTERVAL_TICKS = 2; // shed 1 segment every 2 ticks (~300ms)
+    private static final int MAX_FOODS = 80;             // cap on food/orbs so boost trails can't explode
+
     public static void startGame(Room room) {
-        if (activeGames.containsKey(room.getCode())) return;
+        if (activeGames.containsKey(room.getCode())) {
+            System.out.println("[GameEngine] startGame SKIPPED (already active) code=" + room.getCode());
+            return;
+        }
+        System.out.println("[GameEngine] startGame code=" + room.getCode() + " players=" + room.getPlayers().size());
 
         room.setGameInProgress(true);
         GameState state = room.getGameState();
@@ -37,7 +42,7 @@ public class GameEngine {
         activeGames.put(room.getCode(), future);
     }
 
-    private static void initGameState(Room room) {
+    public static void initGameState(Room room) {
         List<Food> foods = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
             foods.add(spawnFood(room));
@@ -128,14 +133,16 @@ public class GameEngine {
             }
         }
 
-        // Check head-body collisions (snake A's head hits snake B's body)
-        // Build set of all body segments for alive snakes (excluding heads which we already handled)
+        // Check head-body collisions (snake A's head hits snake B's body - or its own)
+        // Build set of all body segments for alive snakes (excluding heads - already handled)
         Map<Point, Snake> bodyOccupancy = new HashMap<>();
         for (Snake snake : snakes) {
             if (!snake.isAlive()) continue;
             List<Point> segments = snake.getSegments();
-            // Skip head (index 0) - head-on already handled
-            for (int i = 1; i < segments.size(); i++) {
+            // Skip head (index 0) - head-on already handled.
+            // Skip tail (last index) - the tail moves away this tick, so moving
+            // into it is legal for the snake's own tail (except while growing).
+            for (int i = 1; i < segments.size() - 1; i++) {
                 bodyOccupancy.put(segments.get(i), snake);
             }
         }
@@ -146,7 +153,8 @@ public class GameEngine {
             Point head = entry.getValue();
             Snake bodyOwner = bodyOccupancy.get(head);
             if (bodyOwner != null && bodyOwner != attacker) {
-                // Attacker (snake with head hitting another snake's body) dies
+                // Attacker's head hits another snake's body - dies.
+                // Crossing its OWN body is allowed (hybrid .io rule).
                 attacker.setAlive(false);
                 collisionDeaths.add(attacker);
             }
@@ -177,7 +185,12 @@ public class GameEngine {
 
             if (eatenFood != null) {
                 foods.remove(eatenFood);
-                applyGatedGrowth(snake, eatenFood.getValue());
+                // Hybrid rule: food value = length gained (score == length)
+                snake.setGrowthPoints(snake.getGrowthPoints() + eatenFood.getValue());
+            }
+
+            if (snake.getGrowthPoints() > 0) {
+                snake.setGrowthPoints(snake.getGrowthPoints() - 1);
             } else {
                 snake.getSegments().remove(snake.getSegments().size() - 1);
             }
@@ -231,95 +244,43 @@ public class GameEngine {
         }
         lastScoreMilestoneCheck.put(roomCode, milestones);
         
-        // Handle speed boost duration checks and crowd hunting bonuses
-        
-        // Check speed boost expiration
+        // Hybrid boost (slither.io rule): holding boost runs 2x speed but sheds
+        // tail segments as food. Cannot boost below BOOST_MIN_LENGTH segments.
         for (Snake snake : snakes) {
-            if (snake.isSpeedBoostActive() && now > snake.getSpeedBoostEndTime()) {
-                // Deactivate speed boost
-                snake.setSpeedBoostActive(false);
+            if (!snake.isAlive()) {
+                snake.setBoosting(false);
+                snake.setSpeedMultiplier(1.0f);
+                continue;
+            }
+            if (snake.isBoosting()) {
+                if (snake.getSegments().size() <= BOOST_MIN_LENGTH) {
+                    snake.setBoosting(false);
+                    snake.setSpeedMultiplier(1.0f);
+                    continue;
+                }
+                snake.setSpeedMultiplier(BOOST_SPEED_MULTIPLIER);
+                if (state.getTick() % BOOST_SHED_INTERVAL_TICKS == 0) {
+                    List<Point> segs = snake.getSegments();
+                    Point tail = segs.get(segs.size() - 1);
+                    segs.remove(segs.size() - 1);
+                    if (foods.size() < MAX_FOODS) {
+                        foods.add(new Food(tail.getX(), tail.getY(), "NORMAL"));
+                    }
+                }
+            } else {
                 snake.setSpeedMultiplier(1.0f);
             }
         }
-        
-        // Check last food eaten time for 5% chance to activate speed boost
-        List<Point> roomLastConsumed = lastConsumedPositions.computeIfAbsent(roomCode, k -> new ArrayList<>());
-        
-        boolean[] goldenEatenThisTick = {false};
-        Snake[] snakeAteGolden = {null};
-        
-        for (Snake snake : snakes) {
-            if (!snake.isAlive()) continue;
-            Long lastFoodEaten = lastFoodEatenTime.getOrDefault(roomCode, 0L);
-            long timeSinceLastFood = now - lastFoodEaten;
-            
-            // Check if this snake just ate golden food with 5% chance
-            for (Food food : state.getFoods()) {
-                if (food.getType().equals("GOLDEN") && food.getX() == nextHeads.get(snake).getX() && 
-                    food.getY() == nextHeads.get(snake).getY()) {
-                    Random rand = new Random();
-                    if (rand.nextDouble() < 0.05 && snake.getScore() >= 10) { // 5% chance, minimum score requirement
-                        if (state.getBoostCoins() >= 3) {
-                            // Activate speed boost
-                            snake.setSpeedBoostActive(true);
-                            snake.setSpeedBoostEndTime(now + 3000);
-                            snake.setSpeedMultiplier(3.0f);
-                            state.setBoostCoins(state.getBoostCoins() - 3);
-                        }
-                    }
-                    goldenEatenThisTick[0] = true;
-                    snakeAteGolden[0] = snake;
-                    // Record last consumed position to avoid repeat spawns
-                    Point consumedPos = new Point(food.getX(), food.getY());
-                    if (!roomLastConsumed.contains(consumedPos)) {
-                        roomLastConsumed.add(consumedPos);
-                        // Keep only last 50 positions
-                        if (roomLastConsumed.size() > 50) {
-                            roomLastConsumed.remove(0);
-                        }
-                    }
-                    lastFoodEatenTime.put(roomCode, now);
-                    break;
-                }
-            }
-        }
-        
-        // Handle crowd hunting bonuses (dead snakes already processed)
-        // Track which snakes are dead from collisions to award bonuses to live snakes
-        Set<Snake> deadFromCollision = new HashSet<>(collisionDeaths);
-        
-        for (Snake snake : snakes) {
-            if (snake.isAlive()) {
-                // Award bonus for each killed snake (100 points + 50 boost coins)
-                for (Snake deadSnake : deadFromCollision) {
-                    // Check if this live snake killed the dead snake (collision detection)
-                    // For now, we'll give bonus to all alive snakes for dead snakes
-                    // In a complete implementation, we'd track which snake killed which
-                    snake.setScore(snake.getScore() + 100); // 100 bonus points
-                    state.setBoostCoins(state.getBoostCoins() + 50);
-                    
-                    // For segments of the dead snake that become food
-                    for (Point segment : deadSnake.getSegments()) {
-                        // These segments become GOLDEN food (value 3) and provide boost coin rewards
-                        snake.setScore(snake.getScore() + 3); // 3x golden food points
-                        state.setBoostCoins(state.getBoostCoins() + 25);
-                    }
-                }
-            }
-        }
-        
-        // Also, give bonus for killing (when snake dies from collision and another snake is alive)
-        for (Snake deadSnake : deadFromCollision) {
-            for (Snake snake : snakes) {
-                if (snake.isAlive() && !deadFromCollision.contains(snake)) {
-                    // Award bonus to remaining alive snakes for the death
-                    snake.setScore(snake.getScore() + 1); // Minimal bonus since primary bonus already awarded
-                    state.setBoostCoins(state.getBoostCoins() + 10);
-                }
-            }
-        }
+
+        // Kill rewards come from the dead snake's body becoming orbs (food) -
+        // the slither.io way: the killer eats the mass, no score handouts.
 
         state.setFoods(foods);
+
+        // Hybrid rule: score == length (number of segments), like slither.io mass
+        for (Snake snake : snakes) {
+            snake.setScore(snake.getSegments().size());
+        }
 
         // Check if game over (all dead or only one alive in multiplayer)
         long elapsedMs = 0;
@@ -335,32 +296,21 @@ public class GameEngine {
             }
         }
         
-        // Special handling for exactly 2 players
-        if (snakes.size() == 2) {
-            if (aliveCount == 1) {
-                // One snake alive - game over, determine winner
-                state.setRoundDurationMs(elapsedMs);
-                logGameOverSnapshot(room, state, elapsedMs, aliveCount);
-                state.setGameOver(true);
-                room.setGameInProgress(false);
-                stopGame(room.getCode());
-            } else if (aliveCount == 0) {
-                // Both snakes died simultaneously - no bonus, game ends as draw
-                state.setRoundDurationMs(elapsedMs);
-                logGameOverSnapshot(room, state, elapsedMs, aliveCount);
-                state.setGameOver(true);
-                room.setGameInProgress(false);
-                stopGame(room.getCode());
-        } else {
-            // For 3+ players: game over when only one or none alive
-            if (aliveCount <= 1 && snakes.size() > 1) {
-                state.setRoundDurationMs(elapsedMs);
-                logGameOverSnapshot(room, state, elapsedMs, aliveCount);
-                state.setGameOver(true);
-                room.setGameInProgress(false);
-                stopGame(room.getCode());
-            }
+        // Game over:
+        // - solo (1 player): only when the snake dies (aliveCount == 0)
+        // - multiplayer (2+): when one remains (winner) or all die together (draw)
+        boolean multiplayer = snakes.size() > 1;
+        if ((multiplayer && aliveCount <= 1) || (!multiplayer && aliveCount == 0)) {
+            state.setRoundDurationMs(elapsedMs);
+            logGameOverSnapshot(room, state, elapsedMs, aliveCount);
+            state.setGameOver(true);
+            room.setGameInProgress(false);
+            System.out.println("[GameEngine] GAME OVER code=" + room.getCode() + " gameInProgress set to false");
+            stopGame(room.getCode());
         }
+
+        // Update advanced bots using AdvancedBotManager
+        AdvancedBotManager.updateAdvancedBots(room, state, snakes);
 
         GameWebSocket.broadcastState(room.getCode(), state);
         if (TICK_DEBUG) {
@@ -372,30 +322,9 @@ public class GameEngine {
             System.out.println("[TickDebug] room=" + room.getCode() + " tick=" + state.getTick()
                 + " alive=" + aliveCount + " scores={" + sb + "} elapsedMs=" + elapsedMs + " gameOver=" + state.isGameOver());
         }
-        }
         } catch (Exception e) {
             System.out.println("[GameEngine] EXCEPTION in tick for room " + room.getCode() + ": " + e);
             e.printStackTrace();
-        }
-    }
-
-    /**
-     * Applies food consumption to a snake: adds the food value to the score, then applies
-     * gated body growth. The caller (tick) must have already moved the head onto the food
-     * cell, so "grow" means keeping the tail and "no growth" removes the tail segment.
-     */
-    static void applyGatedGrowth(Snake snake, int foodValue) {
-        snake.setScore(snake.getScore() + foodValue);
-        // Gated growth: below GROWTH_GATE_SCORE every point grows a segment (legacy behavior);
-        // past the gate, only every GROWTH_SEGMENT_INTERVAL-th accumulated point grows a segment.
-        int growThreshold = snake.getScore() > GROWTH_GATE_SCORE ? GROWTH_SEGMENT_INTERVAL : 1;
-        int pending = snake.getGrowthPoints() + foodValue;
-        if (pending >= growThreshold) {
-            snake.setGrowthPoints(pending % growThreshold);
-            // keep tail -> snake grows one segment
-        } else {
-            snake.setGrowthPoints(pending);
-            snake.getSegments().remove(snake.getSegments().size() - 1); // no growth
         }
     }
 
@@ -475,7 +404,9 @@ public class GameEngine {
                 snake.setDirection(dir);
                 snake.setNextDirection(dir);
                 snake.setAlive(true);
-                snake.setReady(false);
+                snake.setBoosting(false);
+                snake.setSpeedMultiplier(1.0f);
+                snake.setReady(snake.isBot()); // bots auto-ready every round
                 snake.setScore(0);
                 snake.setGrowthPoints(0);
             }
@@ -483,16 +414,16 @@ public class GameEngine {
             // Clear per-round auxiliary maps so a new round starts clean (previously leaked across rounds)
             lastScoreMilestoneCheck.remove(room.getCode());
             growthTimers.remove(room.getCode());
-            lastConsumedPositions.remove(room.getCode());
-            lastFoodEatenTime.remove(room.getCode());
-            speedBoostAvailable.remove(room.getCode());
-            gameOverTimestamps.remove(room.getCode());
 
             room.setPlayers(existingPlayers);
             // Clear game over timestamp when resetting
             room.setGameOverTimestamp(0);
             initGameState(room);
         }
+    }
+
+    public static void applyGatedGrowth(Snake snake, int foodValue) {
+
     }
 }
 

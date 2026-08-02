@@ -63,6 +63,8 @@ public class GameWebSocket {
 
             if ("move".equals(action)) {
                 handleMove(roomCode, playerName, json);
+            } else if ("boost".equals(action)) {
+                handleBoost(roomCode, playerName, json);
             } else if ("ready".equals(action)) {
                 handleReady(roomCode, playerName);
             } else if ("ping".equals(action)) {
@@ -128,8 +130,25 @@ public class GameWebSocket {
         snake.setNextDirection(direction);
     }
 
+    private void handleBoost(String roomCode, String playerName, JsonObject json) {
+        boolean boosting = json.has("boost") && !json.get("boost").isJsonNull() && json.get("boost").getAsBoolean();
+        Room room = roomManager.getRoom(roomCode);
+        if (room == null) return;
+        Snake snake = room.getPlayer(playerName);
+        if (snake == null || !snake.isAlive()) return;
+        snake.touch();
+        snake.setBoosting(boosting);
+    }
+
     private void handlePing(JsonObject json, Session session) {
         long t = System.currentTimeMillis();
+        String roomCode = (String) session.getUserProperties().get("roomCode");
+        if (roomCode != null) {
+            // A connected client keeps the room alive (prevents the stale-room
+            // cleanup from deleting a room while players idle in the lobby)
+            Room room = roomManager.getRoom(roomCode);
+            if (room != null) room.touch();
+        }
         if (json.has("t") && !json.get("t").isJsonNull() && json.get("t").isJsonPrimitive()) {
             try {
                 t = json.get("t").getAsLong();
@@ -146,19 +165,32 @@ public class GameWebSocket {
 
     private void handleReady(String roomCode, String playerName) {
         Room room = roomManager.getRoom(roomCode);
-        if (room == null) return;
-        Snake snake = room.getPlayer(playerName);
-        if (snake == null) return;
-        snake.touch();
-        snake.setReady(true);
-
+        if (room == null) {
+            logger.warning("[ReadyDebug] room null code=" + roomCode + " player=" + playerName);
+            return;
+        }
         synchronized (room) {
+            // Ignore ready requests while a round is running/counting down so the
+            // WS + HTTP double-ready race cannot leave stale ready flags that would
+            // auto-start the next round without every player re-readying.
+            if (room.isGameInProgress()) {
+                logger.warning("[ReadyDebug] BLOCKED gameInProgress=true code=" + roomCode + " player=" + playerName);
+                return;
+            }
+            Snake snake = room.getPlayer(playerName);
+            if (snake == null) {
+                logger.warning("[ReadyDebug] player null code=" + roomCode + " player=" + playerName);
+                return;
+            }
+            snake.touch();
+            snake.setReady(true);
+
             room.removeDisconnectedPlayers();
-            boolean shouldStart = !room.isGameInProgress() && room.allPlayersReady();
-            if (shouldStart) {
-                if (room.canRestart()) {
-                    room.getGameState().setGameOver(false);
-                }
+            boolean allReady = room.allPlayersReady();
+            logger.info("[ReadyDebug] code=" + roomCode + " player=" + playerName + " ready=true allReady=" + allReady
+                + " players=" + room.getPlayers().stream().map(Snake::getName).toList()
+                + " readyFlags=" + room.getPlayers().stream().map(s -> s.getName() + ":" + s.isReady()).toList());
+            if (allReady) {
                 GameEngine.resetGame(room);
                 GameEngine.startGame(room);
             }

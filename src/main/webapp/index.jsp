@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#0d1021">
     <title>Snake Game - Lobby</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐍</text></svg>">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body class="lobby-page">
     <div class="lobby-container" id="app">
@@ -88,11 +88,90 @@
                 </div>
             </div>
 
-            <button class="btn btn-primary" id="createRoomBtn">Create New Room</button>
+            <!-- Game Mode Selection - Card Style -->
+            <div class="form-group" id="gameModeGroup">
+                <div class="mode-selector">
+                    <h4>Choose How to Play</h4>
+                    <div class="mode-cards">
+                        <button type="button" class="mode-card friends active" data-mode="friends" role="tab" aria-selected="true">
+                            <span class="mode-card-glow"></span>
+                            <span class="mode-card-icon-wrap">
+                                <span class="mode-card-icon">👥</span>
+                                <span class="mode-card-icon-pulse"></span>
+                            </span>
+                            <span class="mode-card-title">Play with Friends</span>
+                            <span class="mode-card-desc">Create or join rooms with other players. Share room codes and play together!</span>
+                            <div class="mode-card-footer">
+                                <span class="mode-card-badge">Multiplayer</span>
+                                <span class="mode-card-players">2–4 Players</span>
+                            </div>
+                            <span class="mode-card-check">✓</span>
+                        </button>
+                        <button type="button" class="mode-card bots" data-mode="bots" role="tab" aria-selected="false">
+                            <span class="mode-card-glow"></span>
+                            <span class="mode-card-icon-wrap">
+                                <span class="mode-card-icon">🤖</span>
+                                <span class="mode-card-icon-pulse"></span>
+                            </span>
+                            <span class="mode-card-title">Play with Bots</span>
+                            <span class="mode-card-desc">Practice against AI opponents. Choose difficulty and number of bots.</span>
+                            <div class="mode-card-footer">
+                                <span class="mode-card-badge">Single Player</span>
+                                <span class="mode-card-players">1–3 Bots</span>
+                            </div>
+                            <span class="mode-card-check">✓</span>
+                        </button>
+                    </div>
+                    <div class="mode-hint">
+                        <span class="mode-hint-icon">💡</span>
+                        <span class="mode-hint-text" id="modeHintText">Click a mode to select — <strong>Play with Friends</strong> lets you create or join multiplayer rooms</span>
+                    </div>
+                </div>
+            </div>
 
-            <div class="lobby-actions">
-                <input type="text" id="roomCodeInput" placeholder="Room code" maxlength="10" autocomplete="off">
-                <button class="btn btn-success" id="joinRoomBtn">Join</button>
+            <!-- Friends Mode Options (default visible) -->
+            <div class="mode-options" id="friendsOptions">
+                <button class="btn btn-primary" id="createRoomBtn">Create New Room</button>
+
+                <div class="lobby-actions">
+                    <input type="text" id="roomCodeInput" placeholder="Room code" maxlength="10" autocomplete="off">
+                    <button class="btn btn-success" id="joinRoomBtn">Join</button>
+                </div>
+            </div>
+
+            <!-- Bots Mode Options (hidden by default) -->
+            <div class="mode-options bot-options-panel" id="botsOptions" style="display:none;">
+                <h4>Bot Settings</h4>
+                <div class="bot-options-grid">
+                    <div class="bot-option-group">
+                        <label for="botCount">Number of Bots</label>
+                        <select id="botCount" class="bot-select">
+                            <option value="1">1 Bot</option>
+                            <option value="2" selected>2 Bots</option>
+                            <option value="3">3 Bots</option>
+                        </select>
+                    </div>
+                    <div class="bot-option-group">
+                        <label for="botDifficulty">Difficulty</label>
+                        <select id="botDifficulty" class="bot-select">
+                            <option value="easy">😊 Easy</option>
+                            <option value="normal" selected>😐 Normal</option>
+                            <option value="hard">😤 Hard</option>
+                            <option value="impossible">💀 Impossible</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="difficulty-indicator" id="difficultyIndicator">
+                    <span class="difficulty-indicator-icon" id="difficultyIcon">😐</span>
+                    <div class="difficulty-indicator-info">
+                        <div class="difficulty-indicator-title" id="difficultyTitle">Normal</div>
+                        <div class="difficulty-indicator-desc" id="difficultyDesc">Normal bots play competitively but make occasional mistakes.</div>
+                    </div>
+                    <div class="difficulty-indicator-bar">
+                        <div class="difficulty-indicator-fill normal" id="difficultyBar"></div>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-create-bot" id="createBotRoomBtn">Create Bot Room</button>
             </div>
 
             <div class="room-list">
@@ -134,6 +213,7 @@
         let selectedColor = '#e94560';
         let currentUser = null;
         let isGuest = true;
+        let currentGameMode = 'friends'; // 'friends' or 'bots'
 
         // Tab switching
         document.querySelectorAll('.auth-tab').forEach(function(tab) {
@@ -145,6 +225,66 @@
                 document.getElementById('loginError').style.display = 'none';
                 document.getElementById('regError').style.display = 'none';
             });
+        });
+
+        // Game Mode switching (card-based)
+        document.querySelectorAll('.mode-card').forEach(function(card) {
+            card.addEventListener('click', function() {
+                document.querySelectorAll('.mode-card').forEach(function(c) { 
+                    c.classList.remove('active'); 
+                    c.setAttribute('aria-selected', 'false');
+                });
+                document.querySelectorAll('.mode-options').forEach(function(o) { o.style.display = 'none'; });
+                this.classList.add('active');
+                this.setAttribute('aria-selected', 'true');
+                var mode = this.dataset.mode;
+                currentGameMode = mode;
+                document.getElementById(mode + 'Options').style.display = 'block';
+                
+                // Update hint text
+                var hintText = document.getElementById('modeHintText');
+                if (mode === 'friends') {
+                    hintText.innerHTML = 'Click a mode to select — <strong>Play with Friends</strong> lets you create or join multiplayer rooms';
+                } else {
+                    hintText.innerHTML = 'Click a mode to select — <strong>Play with Bots</strong> lets you practice against AI with adjustable difficulty';
+                }
+            });
+        });
+
+        // Bot difficulty description + dynamic indicator
+        var difficultyData = {
+            'easy': { 
+                desc: 'Easy bots move randomly and make frequent mistakes. Good for practice.',
+                icon: '😊',
+                title: 'Easy',
+                barClass: 'easy'
+            },
+            'normal': { 
+                desc: 'Normal bots play competitively but make occasional mistakes.',
+                icon: '😐',
+                title: 'Normal',
+                barClass: 'normal'
+            },
+            'hard': { 
+                desc: 'Hard bots are aggressive, predict your moves, and rarely make errors.',
+                icon: '😤',
+                title: 'Hard',
+                barClass: 'hard'
+            },
+            'impossible': { 
+                desc: 'Impossible bots have perfect reflexes, predict all outcomes, and never make mistakes. You cannot win.',
+                icon: '💀',
+                title: 'Impossible',
+                barClass: 'impossible'
+            }
+        };
+        document.getElementById('botDifficulty').addEventListener('change', function() {
+            var data = difficultyData[this.value] || difficultyData.normal;
+            document.getElementById('difficultyDesc').textContent = data.desc;
+            document.getElementById('difficultyIcon').textContent = data.icon;
+            document.getElementById('difficultyTitle').textContent = data.title;
+            var bar = document.getElementById('difficultyBar');
+            bar.className = 'difficulty-indicator-fill ' + data.barClass;
         });
 
         // Switch between login/register via links
@@ -263,18 +403,23 @@
         function showLobby() {
             document.getElementById('authScreen').style.display = 'none';
             document.getElementById('lobby').style.display = 'block';
+            var logoutBtn = document.getElementById('logoutBtn');
             if (isGuest) {
                 document.getElementById('lobbyUser').innerHTML = '<span class="guest-badge">👤 Guest</span>';
                 document.getElementById('playerName').value = currentUser;
+                if (logoutBtn) logoutBtn.textContent = 'Back';
             } else {
                 document.getElementById('lobbyUser').innerHTML = '<span class="user-badge">✅ ' + currentUser + '</span>';
                 document.getElementById('playerName').value = currentUser;
+                if (logoutBtn) logoutBtn.textContent = 'Logout';
             }
         }
 
-        // Logout: clear remember-me token and return to auth screen
+        // Logout/Back: clear remember-me token and return to auth screen
         document.getElementById('logoutBtn').addEventListener('click', function() {
-            try { localStorage.removeItem('snake_token'); } catch(e) {}
+            if (!isGuest) {
+                try { localStorage.removeItem('snake_token'); } catch(e) {}
+            }
             document.getElementById('authScreen').style.display = 'block';
             document.getElementById('lobby').style.display = 'none';
             currentUser = null;
@@ -290,18 +435,43 @@
             });
         });
 
-        // Create room
+        // Create room (Friends mode)
         document.getElementById('createRoomBtn').addEventListener('click', function() {
             var btn = this;
             var name = document.getElementById('playerName').value.trim();
             if (!name) { showError('Enter your name first'); return; }
             setLoading(btn, true);
-            Ajax.post('api/room', { action: 'create', playerName: name, color: selectedColor }, function(data) {
+            Ajax.post('api/room', { action: 'create', playerName: name, color: selectedColor, gameMode: 'friends' }, function(data) {
                 setLoading(btn, false);
                 if (data.success) {
                     window.location.href = 'game.jsp?room=' + data.roomCode + '&player=' + encodeURIComponent(name) + '&color=' + encodeURIComponent(selectedColor) + '&guest=' + isGuest;
                 } else {
                     showError(data.error || 'Failed to create room');
+                }
+            });
+        });
+
+        // Create bot room
+        document.getElementById('createBotRoomBtn').addEventListener('click', function() {
+            var btn = this;
+            var name = document.getElementById('playerName').value.trim();
+            if (!name) { showError('Enter your name first'); return; }
+            var botCount = parseInt(document.getElementById('botCount').value, 10);
+            var botDifficulty = document.getElementById('botDifficulty').value;
+            setLoading(btn, true);
+            Ajax.post('api/room', { 
+                action: 'create', 
+                playerName: name, 
+                color: selectedColor, 
+                gameMode: 'bots',
+                botCount: botCount,
+                botDifficulty: botDifficulty
+            }, function(data) {
+                setLoading(btn, false);
+                if (data.success) {
+                    window.location.href = 'game.jsp?room=' + data.roomCode + '&player=' + encodeURIComponent(name) + '&color=' + encodeURIComponent(selectedColor) + '&guest=' + isGuest;
+                } else {
+                    showError(data.error || 'Failed to create bot room');
                 }
             });
         });

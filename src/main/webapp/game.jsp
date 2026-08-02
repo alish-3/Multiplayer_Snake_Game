@@ -38,7 +38,7 @@
     <meta name="theme-color" content="#0d1021">
     <title>Snake Game - Room <%= esc(room) %></title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐍</text></svg>">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=3">
     <script>
         // Apply saved control scheme before first paint to avoid UI flash
         (function() {
@@ -76,7 +76,7 @@
     <header class="game-header mobile-header">
         <div class="mobile-header-left">
             <span class="mobile-room" id="mobileRoomCode"><%= esc(room) %></span>
-            <span class="mobile-score">S:<span id="mobileScoreVal">0</span></span>
+            <span class="mobile-score">L:<span id="mobileScoreVal">0</span></span>
         </div>
         <div class="mobile-header-center">
             <span class="mobile-rank" id="mobileRank">Rank #-</span>
@@ -92,11 +92,18 @@
     </header>
 
     <div class="game-wrapper">
-        <div class="game-canvas-wrapper">
-            <canvas id="gameCanvas" width="600" height="600"></canvas>
-            <!-- Swipe overlay: receives gestures in swipe mode -->
-            <div class="touch-swipe-area" id="swipeArea" aria-hidden="true"></div>
+    <div class="game-canvas-wrapper">
+        <canvas id="gameCanvas" width="600" height="600"></canvas>
+        <!-- Swipe overlay: receives gestures in swipe mode -->
+        <div class="touch-swipe-area" id="swipeArea" aria-hidden="true"></div>
+        
+        <!-- Bot Debug Info (visible during development) -->
+        <div id="botDebugInfo" class="bot-debug-info" style="display: none;">
+            <h3>Bot Debug Info</h3>
+            <div id="botStatus"></div>
+            <div id="botStats"></div>
         </div>
+    </div>
 
         <!-- Sidebar / Leaderboard -->
         <aside class="sidebar" id="sidebar" aria-label="Leaderboard">
@@ -120,15 +127,17 @@
             <div class="controls-info desktop-controls">
                 <strong>Controls</strong><br>
                 <kbd>&uarr;</kbd> <kbd>&darr;</kbd> <kbd>&larr;</kbd> <kbd>&rarr;</kbd> Move<br>
-                <kbd>Space</kbd> Ready / Restart
+                <kbd>Space</kbd> / <kbd>Shift</kbd> Boost (hold - eats your length)<br>
+                <kbd>Enter</kbd> Ready / Restart
             </div>
         </aside>
     </div>
 
-    <!-- Mobile touch controls (D-Pad + READY) -->
+    <!-- Mobile touch controls (D-Pad + READY + BOOST) -->
     <div class="touch-controls dpad-controls" id="dpadControls">
         <div class="touch-ready-area">
             <button class="touch-ready-btn" id="touchReadyBtn">READY</button>
+            <button class="touch-boost-btn" id="boostBtn" title="Hold to boost (consumes length)">⚡ BOOST</button>
         </div>
         <div class="touch-dpad">
             <div class="dpad-row">
@@ -204,7 +213,7 @@
     <input type="hidden" id="playerColor" value="<%= esc(color != null ? color : "#e94560") %>">
     <input type="hidden" id="isGuest" value="<%= "true".equals(guest) ? "true" : "false" %>">
 
-    <script src="js/ajax.js"></script>
-    <script src="js/game.js"></script>
+    <script src="js/ajax.js?v=3"></script>
+    <script src="js/game.js?v=3"></script>
 </body>
 </html>

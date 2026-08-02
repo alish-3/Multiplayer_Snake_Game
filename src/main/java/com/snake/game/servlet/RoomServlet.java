@@ -2,10 +2,12 @@ package com.snake.game.servlet;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.snake.game.engine.GameEngine;
 import com.snake.game.engine.RoomManager;
 import com.snake.game.model.Point;
 import com.snake.game.model.Room;
 import com.snake.game.model.Snake;
+import com.snake.game.util.BotManager;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -138,18 +140,54 @@ public class RoomServlet extends HttpServlet {
     private void handleCreate(JsonObject json, HttpServletResponse resp) throws IOException {
         String playerName = getString(json, "playerName");
         String color = validateColor(getString(json, "color"));
+        String gameMode = getString(json, "gameMode");
+        if (gameMode == null) gameMode = "friends"; // default
+        
+        int botCount = 0;
+        String botDifficulty = "normal";
+        
+        if ("bots".equals(gameMode)) {
+            if (json.has("botCount") && !json.get("botCount").isJsonNull()) {
+                botCount = json.get("botCount").getAsInt();
+            }
+            if (json.has("botDifficulty") && !json.get("botDifficulty").isJsonNull()) {
+                botDifficulty = json.get("botDifficulty").getAsString();
+            }
+            // Validate bot count
+            if (botCount < 1) botCount = 1;
+            if (botCount > 3) botCount = 3;
+            // Validate difficulty
+            String[] validDifficulties = {"easy", "normal", "hard", "impossible"};
+            boolean valid = false;
+            for (String d : validDifficulties) {
+                if (d.equals(botDifficulty)) { valid = true; break; }
+            }
+            if (!valid) botDifficulty = "normal";
+        }
 
         if (!validatePlayerName(playerName, resp, "Create room")) {
             return;
         }
 
         Room room = roomManager.createRoom();
+        room.setGameMode(gameMode);
+        room.setBotCount(botCount);
+        room.setBotDifficulty(botDifficulty);
+        
         Snake snake = new Snake(playerName, color, new Point(5, 5));
         snake.setDirection("RIGHT");
         snake.setNextDirection("RIGHT");
         synchronized (room) {
             room.getPlayers().add(snake);
         }
+        
+        if ("bots".equals(gameMode)) {
+            BotManager.fillWithBots(room, botCount, botDifficulty);
+        }
+        // No bots for "friends" mode
+        
+        // Initialize GameState for the room so it appears in active rooms
+        GameEngine.initGameState(room);
 
         resp.getWriter().write(gson.toJson(Map.of(
             "success", true,
@@ -220,8 +258,8 @@ public class RoomServlet extends HttpServlet {
             segs.add(new Point(head.getX() + 2 * dx, head.getY()));
             snake.setSegments(segs);
 
-            room.getPlayers().add(snake);
-
+room.getPlayers().add(snake);
+            
             if (room.getGameState() != null) {
                 GameWebSocket.broadcastState(room.getCode(), room.getGameState());
             }
