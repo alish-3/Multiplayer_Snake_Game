@@ -1,6 +1,8 @@
 # Multiplayer Snake Game 🐍
 
-> A real-time multiplayer Snake game built with **Java 17**, **Jakarta EE 6**, **WebSocket**, and **PostgreSQL** — featuring room-based gameplay, JWT authentication, and a responsive canvas UI.
+> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 3, 2026
+
+> A real-time multiplayer Snake game built with **Java 17**, **Jakarta EE 6**, **WebSocket**, and **PostgreSQL** — featuring room-based gameplay, JWT authentication, hybrid IO mechanics, and a responsive canvas UI.
 
 ![Java](https://img.shields.io/badge/Java-17-orange?logo=openjdk)
 ![Jakarta EE](https://img.shields.io/badge/Jakarta%20EE-6.0-blue?logo=java)
@@ -11,19 +13,33 @@
 
 ---
 
-## 🎮 Features
+## 🎮 Core Features
 
-| Feature | Description |
-|---------|-------------|
-| **Multiplayer Rooms** | Create/join rooms with 6-character codes, up to 4 players per room |
-| **Real-time Gameplay** | WebSocket-powered 150ms tick loop with server-authoritative physics |
-| **JWT Authentication** | Guest play, register/login, 30-day remember-me tokens (HS256) |
-| **Secure Passwords** | bcrypt hashing with legacy SHA-256 migration support |
-| **PostgreSQL Persistence** | Player stats: total games, total score, high score |
-| **Modern UI** | Responsive lobby + canvas game with touch/mobile support |
-| **Power-ups** | Golden food (3× points, 5% speed boost), boost coins every 5s |
-| **AI Bots** | Smart TypeScript AI bots for automated play-testing |
-| **Cross-platform** | Works on desktop and mobile browsers |
+### Multiplayer Experience
+- **Instant Rooms** — 6-character room codes for quick sharing
+- **4-Player Max** — Competitive or cooperative gameplay
+- **WebSocket Physics** — 150ms authoritative tick loop for fair, smooth gameplay
+
+### Security & Authentication
+- **JWT Tokens** — Stateless, scalable authentication with HS256
+- **bcrypt Passwords** — Industry-standard hashing with legacy migration support
+- **Guest Play** — Easy access without account creation
+- **Remember-Me** — 30-day persistent sessions
+
+### Persistent Stats & Progression
+- **PostgreSQL Backend** — Player stats: total games, total score, high score
+- **Power-ups** — Golden food (3× points, 5% speed boost chance), boost coins every 5s
+- **Boost System** — Spend 3 coins for 3× speed (3s), earn via milestones
+
+### Advanced Gameplay
+- **Hybrid IO Rules** — Walk your own body allowed; head‑ons kill both snakes; other snakes' bodies are lethal
+- **Smart AI Bots** — Four unique personalities (balanced, aggressive, defensive, foodie, hunter) for testing and entertainment
+- **Cross-Platform** — Desktop, mobile, touch‑and‑gesture controls
+
+### Developer-Friendly
+- **Jakarta EE 6** — Modern, standards‑based Java web development
+- **Comprehensive API** — Full REST/ WebSocket coverage
+- **Playwright Tests** — E2E automation with AI bot scenarios
 
 ---
 
@@ -329,5 +345,5 @@ MIT License — feel free to use, modify, and distribute.
 
 ---
 
-*Last updated: August 2, 2026*  
+*Last updated: August 3, 2026*  
 *Status: Actively maintained — bugs are tracked, fixed, and verified. Committed to making this as bug-free as possible.*
