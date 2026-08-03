@@ -92,76 +92,50 @@ public class GameEngine {
             snake.setDirection(snake.getNextDirection());
         }
 
-        // Calculate next positions
+        // Calculate next positions + the FULL path the head sweeps this tick.
+        // The head can move more than one cell per tick (2x/3x speed), so it
+        // would otherwise jump OVER bodies instead of colliding with them.
         Map<Snake, Point> nextHeads = new HashMap<>();
+        Map<Snake, List<Point>> paths = new HashMap<>();
         for (Snake snake : snakes) {
             if (!snake.isAlive()) continue;
+            Point head = snake.getHead();
             Point next = snake.getNextHead();
             nextHeads.put(snake, next);
+            List<Point> path = new ArrayList<>();
+            int sx = (int) Math.signum(next.getX() - head.getX());
+            int sy = (int) Math.signum(next.getY() - head.getY());
+            int len = Math.max(Math.abs(next.getX() - head.getX()), Math.abs(next.getY() - head.getY()));
+            for (int k = 1; k <= len; k++) {
+                path.add(new Point(head.getX() + sx * k, head.getY() + sy * k));
+            }
+            paths.put(snake, path);
         }
 
-        // Track which snakes die from collision (for food spawning)
-        Set<Snake> collisionDeaths = new HashSet<>();
+        // Track snakes killed by the wall and by collisions (for food spawning).
         Set<Snake> wallDeaths = new HashSet<>();
 
-        // Check wall collisions
-        for (Snake snake : snakes) {
-            if (!snake.isAlive()) continue;
-            Point head = nextHeads.get(snake);
-            if (head.getX() < 0 || head.getX() >= GRID_SIZE || head.getY() < 0 || head.getY() >= GRID_SIZE) {
-                snake.setAlive(false);
-                wallDeaths.add(snake);
-            }
-        }
-
-        // Check head-on collisions (multiple snakes moving to same cell)
-        Map<Point, List<Snake>> headOnMap = new HashMap<>();
-        for (Map.Entry<Snake, Point> entry : nextHeads.entrySet()) {
+        // Check wall collisions along the ENTIRE path (not just the endpoint),
+        // so a fast snake can't skip out of the board.
+        for (Map.Entry<Snake, List<Point>> entry : paths.entrySet()) {
             Snake snake = entry.getKey();
-            if (!snake.isAlive()) continue; // already dead from wall
-            Point head = entry.getValue();
-            headOnMap.computeIfAbsent(head, k -> new ArrayList<>()).add(snake);
-        }
-
-        for (List<Snake> contenders : headOnMap.values()) {
-            if (contenders.size() >= 2) {
-                // All contendents die in head-on collision
-                for (Snake snake : contenders) {
+            if (!snake.isAlive()) continue;
+            for (Point cell : entry.getValue()) {
+                if (cell.getX() < 0 || cell.getX() >= GRID_SIZE || cell.getY() < 0 || cell.getY() >= GRID_SIZE) {
                     snake.setAlive(false);
-                    collisionDeaths.add(snake);
+                    wallDeaths.add(snake);
+                    break;
                 }
             }
         }
 
-        // Check head-body collisions (snake A's head hits snake B's body - or its own)
-        // Build set of all body segments for alive snakes (excluding heads - already handled)
-        Map<Point, Snake> bodyOccupancy = new HashMap<>();
-        for (Snake snake : snakes) {
-            if (!snake.isAlive()) continue;
-            List<Point> segments = snake.getSegments();
-            // Skip head (index 0) - head-on already handled.
-            // Skip tail (last index) - the tail moves away this tick, so moving
-            // into it is legal for the snake's own tail (except while growing).
-            for (int i = 1; i < segments.size() - 1; i++) {
-                bodyOccupancy.put(segments.get(i), snake);
-            }
-        }
+        // Foods that exist at the start of this tick (before any collision-food spawns).
+        List<Food> foods = new ArrayList<>(state.getFoods() != null ? state.getFoods() : new ArrayList<>());
 
-        for (Map.Entry<Snake, Point> entry : nextHeads.entrySet()) {
-            Snake attacker = entry.getKey();
-            if (!attacker.isAlive()) continue; // already dead from wall or head-on
-            Point head = entry.getValue();
-            Snake bodyOwner = bodyOccupancy.get(head);
-            if (bodyOwner != null && bodyOwner != attacker) {
-                // Attacker's head hits another snake's body - dies.
-                // Crossing its OWN body is allowed (hybrid .io rule).
-                attacker.setAlive(false);
-                collisionDeaths.add(attacker);
-            }
-        }
+        // Resolve head-ons and head-body hits against the post-move bodies.
+        Set<Snake> collisionDeaths = resolveHeadBodyCollisions(snakes, nextHeads, paths, foods);
 
         // Spawn food from collision deaths (body segments become GOLDEN food, value 3)
-        List<Food> foods = new ArrayList<>(state.getFoods() != null ? state.getFoods() : new ArrayList<>());
         for (Snake deadSnake : collisionDeaths) {
             for (Point segment : deadSnake.getSegments()) {
                 foods.add(new Food(segment.getX(), segment.getY(), "GOLDEN"));
@@ -424,6 +398,94 @@ public class GameEngine {
 
     public static void applyGatedGrowth(Snake snake, int foodValue) {
 
+    }
+
+    /**
+     * Resolves head-on and head-body collisions for a single tick.
+     *
+     * <p>Head-ons: when two or more different heads sweep the same cell along their
+     * paths in the same tick, all of them die (mutual kill).</p>
+     *
+     * <p>Head-body: attacker heads are checked against the POST-MOVE bodies of the
+     * other snakes (new head added, tail removed unless the snake is growing or
+     * feeding). This closes the "chase" hole where a chaser landing on a leader's
+     * CURRENT head cell escaped collision: after the move that cell becomes the
+     * leader's neck and is solid, so a snake riding up the same row/column behind
+     * another snake's head must die. A chaser following the vacating tail still
+     * survives (that cell is not in the post-move body), and crossing one's OWN
+     * body stays allowed (hybrid .io rule).</p>
+     *
+     * @return the set of snakes killed by collision this tick (they are marked dead)
+     */
+    static Set<Snake> resolveHeadBodyCollisions(List<Snake> snakes, Map<Snake, Point> nextHeads,
+                                               Map<Snake, List<Point>> paths, List<Food> foods) {
+        Set<Snake> collisionDeaths = new HashSet<>();
+
+        // Head-on collisions: any cell occupied by 2+ different heads during this
+        // tick (any step along their paths) is a mutual kill.
+        Map<Point, List<Snake>> headOnMap = new HashMap<>();
+        for (Map.Entry<Snake, List<Point>> entry : paths.entrySet()) {
+            Snake snake = entry.getKey();
+            if (!snake.isAlive()) continue; // already dead from wall
+            for (Point cell : entry.getValue()) {
+                headOnMap.computeIfAbsent(cell, k -> new ArrayList<>()).add(snake);
+            }
+        }
+
+        for (Map.Entry<Point, List<Snake>> entry : headOnMap.entrySet()) {
+            if (entry.getValue().size() >= 2) {
+                Set<Snake> distinct = new HashSet<>(entry.getValue());
+                if (distinct.size() >= 2) {
+                    for (Snake snake : distinct) {
+                        snake.setAlive(false);
+                        collisionDeaths.add(snake);
+                    }
+                }
+            }
+        }
+
+        // Head-body collisions: build the POST-MOVE body of every alive snake.
+        Map<Point, Snake> bodyOccupancy = new HashMap<>();
+        for (Snake snake : snakes) {
+            if (!snake.isAlive()) continue;
+            Point nextHead = nextHeads.get(snake);
+            List<Point> nextSegments = new ArrayList<>();
+            nextSegments.add(nextHead);
+            nextSegments.addAll(snake.getSegments());
+            boolean ateFood = false;
+            for (Food food : foods) {
+                if (food.getX() == nextHead.getX() && food.getY() == nextHead.getY()) {
+                    ateFood = true;
+                    break;
+                }
+            }
+            // Tail is retained this tick if the snake is growing or eats food.
+            boolean tailRetained = snake.getGrowthPoints() > 0 || ateFood;
+            if (!tailRetained) {
+                nextSegments.remove(nextSegments.size() - 1);
+            }
+            // Index 0 is the new head (head-ons already handled); the rest is solid body.
+            for (int i = 1; i < nextSegments.size(); i++) {
+                bodyOccupancy.put(nextSegments.get(i), snake);
+            }
+        }
+
+        for (Map.Entry<Snake, List<Point>> entry : paths.entrySet()) {
+            Snake attacker = entry.getKey();
+            if (!attacker.isAlive()) continue; // already dead from wall or head-on
+            for (Point cell : entry.getValue()) {
+                Snake bodyOwner = bodyOccupancy.get(cell);
+                if (bodyOwner != null && bodyOwner != attacker) {
+                    // Attacker's head hits another snake's body - dies.
+                    // Crossing its OWN body is allowed (hybrid .io rule).
+                    attacker.setAlive(false);
+                    collisionDeaths.add(attacker);
+                    break;
+                }
+            }
+        }
+
+        return collisionDeaths;
     }
 }
 

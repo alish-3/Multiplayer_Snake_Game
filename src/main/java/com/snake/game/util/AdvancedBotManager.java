@@ -1,601 +1,302 @@
-// =========================================================
-// B O T  A I  F I X E S - F O O D  S E E K I N G  P R I O R I T Y
-// =========================================================
-//
-// ISSUE IDENTIFIED:
-// Original evaluation logic had IMPOSSIBLE food evaluation conditions
-// Safe zone check: safeZoneProximity >= 1000 (max is ~15 - NEVER MET)
-// This meant NO food scoring occurred - bots got stuck in safe zones
-//
-// FIX IMPLEMENTED:
-// 1. Direct food proximity scoring - no complex safe zone gating
-// 2. Strong food incentives to override safety when beneficial
-// 3. Balanced risk/reward system based on difficulty
-//
-// KEY CHANGES:
-// - Food is PRIMARY objective (3x difficulty weight)
-// - Safety is secondary (0.5x weight)
-// - Safe zone is helpful but not prioritized
-// - Strong bonuses for close food (5000-15000 difficulty)
-// - Different risk profiles for each difficulty level
-// =========================================================
-
 package com.snake.game.util;
 
 import com.snake.game.model.*;
 import java.util.*;
 
+/**
+ * Bot AI v2 - flood-fill survival + opponent-aware hunting.
+ *
+ * Per-difficulty behavior:
+ *  - EASY:       naive escape checks only, weak food sense, frequent real
+ *                mistakes (picks a worse-scoring move on purpose).
+ *  - NORMAL:     flood-fill safety (won't casually trap itself), solid food
+ *                sense, no hunting.
+ *  - HARD:       full safety + efficient food routing + takes free trap/kill
+ *                opportunities when they fall in its lap.
+ *  - IMPOSSIBLE: full safety (near-zero self-trap chance), optimal food
+ *                routing, ACTIVELY hunts and cuts off nearby opponents when
+ *                it can do so without risking itself, zero randomness.
+ *                Head-on collisions are treated as near-death, not a "win" -
+ *                see note on huntingBonus() below for why.
+ */
 public class AdvancedBotManager {
 
     private static final int GRID_SIZE = 30;
-    private static final int MAX_LOOKAHEAD_DISTANCE = 15;
-    private static final double EXPLORATION_PRIORITY = 0.5;
-    private static final double WALL_AVOIDANCE_BONUS = 3.0;
-    private static final double SAFE_CORNER_BIAS = 4.0;
-    private static final double SURVIVAL_PRIORITY_FACTOR = 2.0;
-    
-    // Safety configuration - optimized for survival
-    private static final int SAFETY_DISTANCE = 5;
-    private static final int MIN_ESCAPE_ROUTES = 2;
-    private static final int SAFE_MARGIN = 3;
-    private static final int TRAP_LENGTH_THRESHOLD = 12;
-    
+    private static final Random RANDOM = new Random();
+
     private AdvancedBotManager() {}
-    
+
     public static void updateAdvancedBots(Room room, GameState state, List<Snake> snakes) {
         if (state == null || state.isGameOver() || !state.isGameStarted()) return;
         List<Food> foods = state.getFoods();
         synchronized (room) {
             for (Snake bot : snakes) {
                 if (!bot.isBot() || !bot.isAlive()) continue;
-                
-                String difficulty = bot.getBotDifficulty();
-                String strategy = bot.getBotStrategy();
-                double difficultyValue = getDifficultyValue(difficulty);
-                
-                bot.setNextDirection(makeAdvancedBotDecision(bot, state, foods, difficultyValue, strategy));
+                Difficulty diff = Difficulty.from(bot.getBotDifficulty());
+                bot.setNextDirection(decide(bot, snakes, foods, diff));
             }
         }
     }
-    
-    private static double getDifficultyValue(String difficulty) {
-        switch (difficulty.toLowerCase()) {
-            case "easy": return 0.3;
-            case "normal": return 0.6;
-            case "hard": return 0.8;
-            case "impossible": return 1.0;
-            default: return 0.6;
+
+    // ---------------------------------------------------------------
+    // Difficulty profile
+    // ---------------------------------------------------------------
+    private enum Difficulty {
+        EASY(0.35, false, 0.25, false, 0.2),
+        NORMAL(1.0, true, 0.08, false, 0.6),
+        HARD(1.0, true, 0.02, true, 0.9),
+        IMPOSSIBLE(1.0, true, 0.0, true, 1.0);
+
+        final double foodWeight;
+        final boolean useFloodFill;
+        final double mistakeChance;
+        final boolean hunt;
+        final double safetyScale; // how strongly self-trap risk is punished
+
+        Difficulty(double foodWeight, boolean useFloodFill, double mistakeChance, boolean hunt, double safetyScale) {
+            this.foodWeight = foodWeight;
+            this.useFloodFill = useFloodFill;
+            this.mistakeChance = mistakeChance;
+            this.hunt = hunt;
+            this.safetyScale = safetyScale;
+        }
+
+        static Difficulty from(String s) {
+            if (s == null) return NORMAL;
+            switch (s.toLowerCase()) {
+                case "easy": return EASY;
+                case "hard": return HARD;
+                case "impossible": return IMPOSSIBLE;
+                default: return NORMAL;
+            }
         }
     }
-    
-    private static String makeAdvancedBotDecision(Snake bot, GameState state, List<Food> foods, double difficulty, String strategy) {
+
+    // ---------------------------------------------------------------
+    // Core decision
+    // ---------------------------------------------------------------
+    private static String decide(Snake bot, List<Snake> snakes, List<Food> foods, Difficulty diff) {
         Point head = bot.getHead();
         if (head == null) return bot.getDirection();
-        
-        String[] dirs = {"UP", "DOWN", "LEFT", "RIGHT"};
-        String currentDir = bot.getDirection();
-        
-        // Get all legal moves (excluding reverse and walls)
-        List<String> legalMoves = new ArrayList<>();
-        for (String dir : dirs) {
-            if (bot.getSegments().size() > 1 && isReverse(dir, currentDir)) continue;
-            
+
+        List<String> legal = legalMoves(bot);
+        if (legal.isEmpty()) return bot.getDirection();
+
+        Set<Point> occupied = collectOccupied(bot, snakes);
+        Set<Point> predictedOpponentHeads = predictOpponentHeads(bot, snakes);
+
+        List<ScoredMove> scored = new ArrayList<>();
+        for (String dir : legal) {
             Point next = step(head, dir);
             if (next == null || isWall(next)) continue;
-            
-            legalMoves.add(dir);
+            double score = evaluate(bot, next, snakes, foods, occupied, predictedOpponentHeads, diff);
+            scored.add(new ScoredMove(dir, score));
         }
-        
-        if (legalMoves.isEmpty()) {
-            return currentDir;
+
+        if (scored.isEmpty()) return bot.getDirection(); // no legal non-wall move; direction irrelevant
+
+        scored.sort((a, b) -> Double.compare(b.score, a.score));
+
+        // Lower difficulties occasionally take a real (non-best) move so
+        // they stay beatable instead of playing at engine-optimal level.
+        if (diff.mistakeChance > 0 && scored.size() > 1 && RANDOM.nextDouble() < diff.mistakeChance) {
+            return scored.get(1 + RANDOM.nextInt(scored.size() - 1)).dir;
         }
-        
-        // Apply strategy-specific weighting
-        List<DirectionScore> scoredDirs = new ArrayList<>();
-        for (String dir : legalMoves) {
-            Point next = step(head, dir);
-            if (next == null) continue;
-            
-            double score = evaluateAdvancedMove(bot, next, dir, foods, state, difficulty, strategy);
-            scoredDirs.add(new DirectionScore(dir, score));
-        }
-        
-        // Find best score
-        double bestScore = scoredDirs.stream().mapToDouble(ds -> ds.score).max().orElse(Double.NEGATIVE_INFINITY);
-        
-        // Filter ties
-        final double EPSILON = 0.1;
-        List<String> bestDirs = scoredDirs.stream()
-            .filter(ds -> ds.score >= bestScore - EPSILON)
-            .map(ds -> ds.dir)
-            .toList();
-        
-        // Pick randomly among best
-        Random rnd = new Random();
-        return bestDirs.get(rnd.nextInt(bestDirs.size()));
+
+        return scored.get(0).dir;
     }
-    
-    private static List<DirectionScore> applyStrategyWeighting(List<DirectionScore> dirs, String strategy, double difficulty) {
-        List<DirectionScore> weighted = new ArrayList<>(dirs);
-        
-        switch (strategy) {
-            case "defensive":
-                // Heavy penalty for body collisions, prefer walls
-                for (DirectionScore ds : weighted) {
-                    if (ds.score < 0) {
-                        ds.score *= (1.0 + difficulty * 3.0);
-                    }
-                }
-                break;
-                
-            case "aggressive":
-                // Bonus for head-on collisions with smaller snakes
-                for (DirectionScore ds : weighted) {
-                    if (ds.score > 10000) { // Currently hitting something
-                        ds.score += 10000 * difficulty;
-                    }
-                }
-                break;
-                
-            case "foodie":
-                // Strong food bias
-                for (DirectionScore ds : weighted) {
-                    if (ds.score < 0) {
-                        ds.score *= (1.0 + (1.0 - difficulty)); // Less penalty for foodies
-                    }
-                }
-                break;
-                
-            case "balanced":
-                // Balanced scoring, moderate weights
-                // Already balanced in evaluation
-                break;
-        }
-        
-        return weighted;
-    }
-    
-    private static double evaluateAdvancedMove(Snake bot, Point next, String dir, List<Food> foods, GameState state, double difficulty, String strategy) {
-        double score = 0.0;
-        Random rnd = new Random();
-        
-        // Behavioral jitter
-        score += rnd.nextDouble() * 0.4;
-        
-        // CRITICAL FIX: Wall collision check with food awareness
-        if (isWall(next)) {
-            // Check if there's food within reach before applying wall penalty
-            Food nearestFood = nearestFood(next, foods);
-            if (nearestFood != null) {
-                int foodDistance = manhattan(next, nearestFood.getX(), nearestFood.getY());
-                if (foodDistance <= 5) {
-                    // Food priority: allow moving toward food even near walls
-                    score -= 10000 * difficulty; // Much lighter penalty when food is available
-                    // NOTE: Removed early return to allow food-seeking bonuses (lines 188-226)
-                    // to be calculated properly - CRITICAL FIX
-                } else {
-                    // Standard wall penalty when food is far (no food priority)
-                    score -= 100000 * difficulty;
-                }
-            } else {
-                // Standard wall penalty when no food nearby
-                score -= 100000 * difficulty;
-            }
-            return score;
-        }
-        
-        // ===== FOOD SEEKING PRIORITY =====
-        // Make food the PRIMARY objective - MUST go for food first
-        Food nearest = nearestFood(next, foods);
-        if (nearest != null) {
-            int d = manhattan(next, nearest.getX(), nearest.getY());
-            if (d < 25) {  // Reachable food - prioritize food seeking
-                // ===== ENHANCED FOOD ATTRACTION =====
-                // Make food much more attractive than safe positioning
-                // Primary food score - distance-based attraction
-                double foodScore = (20 - d) * 8.0 * difficulty;  // MASSIVE food multiplier
-                score += foodScore;
-                
-                // ===== FOOD CONSUMPTION BONUS =====
-                // Huge bonus for actually eating food - encourages going TO food
-                if (d < 5) {
-                    // Move to food position - not just near it
-                    if (isOnSameSpot(bot, next, nearest)) {
-                        score += 100000 * difficulty; // MASSIVE bonus for EATING food
-                    } else {
-                        score += 50000 * difficulty; // Strong incentive to approach
-                    }
-                    
-                    // Apply consumption penalty only if not already eating
-                    if (!isOnSameSpot(bot, next, nearest)) {
-                        score -= 50000 * difficulty; // Penalty for not eating available food
-                    }
-                }
-                
-                // ===== ADDITIONAL FOOD INCENTIVE =====
-                if (d < 8) {
-                    score += 8000 * difficulty; // Much larger bonus for reasonable distance
-                }
-                
-                // ===== EXTRA FOOD DRIVERS FOR HIGHER DIFFICULTIES =====
-                if (difficulty >= 0.9) {
-                    score += 50000 * difficulty; // EXTREME food bonus for impossible difficulty
-                } else if (difficulty >= 0.7) {
-                    score += 15000 * difficulty; // Strong bonus for hard difficulty
-                }
-                
-                // ===== REMOVED: SAFE ZONE INTERFERENCE =====
-                // Food evaluation happens FIRST before any safe zone checks
-                // This ensures food is always the top priority
-            }
-        }
-        
-        // ===== IMMEDIATE SAFETY =====
-        double safetyPriority = calculateImmediateSafety(bot, next, state, difficulty);
-        
-        // ===== SIMPLIFIED SAFETY FOR HIGHER DIFFICULTIES =====
-        if (difficulty >= 0.9) {
-            // For impossible difficulty, safety is secondary but still has minimal impact
-            safetyPriority = safetyPriority * 0.1; // Drastically reduce safety priority
-        } else {
-            // Normal difficulty
-            safetyPriority = safetyPriority * 0.5; // LOWER survival weight - food more important
-        }
-        
-        score += safetyPriority;
-        
-        // ===== REMOVED: SAFE ZONE POSITIONING =====
-        // Safe zone positioning removed - bots now focus solely on food and competition
-        
-        // ===== DANGER AVOIDANCE =====
-        for (Snake other : state.getSnakes()) {
-            if (other == bot || !other.isAlive()) continue;
-            for (Point seg : other.getSegments()) {
-                if (seg.equals(next)) {
-                    // ===== CRITICAL: Opponent body collision detection =====
-                    // Bots MUST die when hitting opponent bodies (no passing through)
-                    // This prevents passing through opponents and enforces competitive play
-                    // ===== REDUCED DANGER FOR IMPOSSIBLE DIFFICULTY =====
-                    double dangerMultiplier = getDangerMultiplier(strategy);
-                    if (difficulty >= 0.9) {
-                        // For impossible difficulty, danger has minimal impact
-                        score -= 1000 * difficulty * dangerMultiplier;
-                    } else {
-                        // Normal difficulty penalty
-                        score -= 15000 * difficulty * dangerMultiplier;
-                    }
-                }
-            }
-        }
-        
-        // ===== PREDICTIVE LOOKAHEAD FOR HIGHER DIFFICULTIES =====
-        if (difficulty >= 0.7) {
-            score += simulateLookahead(bot, next, foods, state, difficulty, strategy, 2, 1.0);
-        }
-        
-        // ===== ALTERNATIVE PATH PLANNING =====
-        if (difficulty >= 0.8 && isDecisionPoint(bot, next, state)) {
-            score += alternativePathBonus(bot, next, foods, state, difficulty);
-        }
-        
-        // ===== STRATEGY-SPECIFIC SCORING =====
-        score += getStrategyBonus(bot, next, state, strategy, difficulty);
-        
-        return score;
-    }
-    
-    private static boolean isInSafeArea(Snake bot, Point next, GameState state) {
-        if (next == null) return false;
-        
-        // Check if move keeps us away from danger zones
-        List<Point> currentSegments = bot.getSegments();
-        for (Point seg : currentSegments) {
-            if (seg.equals(next)) continue; // Skip our current position
-            
-            // Check wall proximity
-            if (seg.getX() < 3 || seg.getX() > 27 || seg.getY() < 3 || seg.getY() > 27) {
-                // We're already in risky area, this move might be dangerous
-                if (next.getX() < 5 || next.getX() > 25 || next.getY() < 5 || next.getY() > 25) {
-                    return false;
-                }
-            }
-        }
-        
-        return true;
-    }
-    
-    private static double calculateImmediateSafety(Snake bot, Point next, GameState state, double difficulty) {
-        double score = 0;
-        
-        // Create temporary simulation for safety check
-        List<Point> tempSegments = new ArrayList<>(bot.getSegments());
-        tempSegments.add(0, next);
-        
-        // Calculate escape routes
-        int escapeRoutes = countEscapeRoutes(tempSegments, bot, state);
-        
-        // Strong survival bonus (kept for all difficulties)
-        score += escapeRoutes * 5000;
-        
-        // REDUCED penalty for impossible difficulty
-        if (difficulty >= 0.9) {
-            // For impossible difficulty, much lighter penalty
-            if (escapeRoutes < MIN_ESCAPE_ROUTES) {
-                score -= 5000 * difficulty; // Reduced from 20000
-            }
-        } else {
-            // Normal difficulty heavy penalty
-            if (escapeRoutes < MIN_ESCAPE_ROUTES) {
-                score -= 20000 * difficulty;
-            }
-        }
-        
-        // Bonus if we're already in a good safe position (reduced for impossible)
-        if (bot.getSegments().size() > 15) {
-            if (escapeRoutes >= 2) {
-                if (difficulty >= 0.9) {
-                    score += 3000 * difficulty; // Reduced from 15000
-                } else {
-                    score += 15000 * difficulty;
-                }
-            }
-        }
-        
-        return score;
-    }
-    
-    private static double getSafeZoneProximityScore(Point pos, Snake bot) {
-        return 0; // REMOVED: Safe zone positioning - no more defensive positioning to encourage "playing alone"
-    }
-    
-    private static boolean checkIfMightGetTrapped(Snake bot, Point next, Food food, GameState state, double difficulty) {
-        // Create temporary simulation
-        List<Point> simulatedSegments = new ArrayList<>(bot.getSegments());
-        simulatedSegments.add(0, next);
-        
-        // Count escape routes
-        int escapeRoutes = countEscapeRoutes(simulatedSegments, bot, state);
-        
-        // If we have fewer than 3 escape routes and our length is getting long, we're in danger
-        return escapeRoutes < 3 && bot.getSegments().size() > TRAP_LENGTH_THRESHOLD;
-    }
-    
-    private static int countEscapeRoutes(List<Point> segments, Snake bot, GameState state) {
-        if (segments.isEmpty()) return 0;
-        Point head = segments.get(0);
-        String currentDir = segments.size() > 1 ? getDirectionFromPoints(segments.get(0), segments.get(1)) : "RIGHT";
+
+    private static List<String> legalMoves(Snake bot) {
         String[] dirs = {"UP", "DOWN", "LEFT", "RIGHT"};
-        int routes = 0;
-        
-        for (String dir : dirs) {
-            if (isReverse(dir, currentDir)) continue;
-            Point next = step(head, dir);
-            if (next == null) continue;
-            
-            // Check if this move is safe
-            if (!isWall(next) && !isInDangerZoneSimple(next, bot, state)) {
-                boolean collidesWithOwnBody = false;
-                for (int i = 2; i < segments.size() - 1; i++) { // Skip head and adjacent segment
-                    if (segments.get(i).equals(next)) {
-                        collidesWithOwnBody = true;
-                        break;
-                    }
-                }
-                if (!collidesWithOwnBody) {
-                    routes++;
-                }
+        String current = bot.getDirection();
+        List<String> out = new ArrayList<>();
+        for (String d : dirs) {
+            if (bot.getSegments().size() > 1 && isReverse(d, current)) continue;
+            out.add(d);
+        }
+        return out;
+    }
+
+    // ---------------------------------------------------------------
+    // Move evaluation
+    // ---------------------------------------------------------------
+    private static double evaluate(Snake bot, Point next, List<Snake> snakes, List<Food> foods,
+                                    Set<Point> occupied, Set<Point> predictedOpponentHeads, Difficulty diff) {
+
+        // 1) Guaranteed-death filter: stepping onto an OPPONENT's body cell is
+        //    instant death this tick. Our own body is NOT deadly (hybrid .io
+        //    rule) so it never appears in `occupied`.
+        if (occupied.contains(next)) {
+            return -1_000_000;
+        }
+
+        double score = 0;
+
+        // 2) Head-on avoidance. In this engine two snakes stepping onto the
+        //    same cell BOTH die - it's a mutual kill, never a genuine win.
+        //    So a "smart" bot should dodge these, not seek them, at every
+        //    difficulty (scaled down a bit for easy/normal so they still
+        //    occasionally blunder into one).
+        if (predictedOpponentHeads.contains(next)) {
+            score -= 700_000 * (0.35 + 0.65 * diff.safetyScale);
+        }
+
+        // 3) Survival - flood-fill reachable space after this move.
+        int mySpace;
+        if (diff.useFloodFill) {
+            Set<Point> blocked = new HashSet<>(occupied);
+            blocked.remove(next);
+            mySpace = floodFill(next, blocked, bot.getSegments().size() + 40);
+        } else {
+            mySpace = countImmediateEscapes(next, occupied);
+        }
+        int needed = Math.max(4, bot.getSegments().size() / 2);
+        if (mySpace < needed) {
+            score -= (needed - mySpace) * 3000.0 * diff.safetyScale;
+        }
+        score += Math.min(mySpace, 150) * 12;
+
+        // 4) Food.
+        Food nearestFood = nearestFood(next, foods);
+        if (nearestFood != null) {
+            int d = manhattan(next, nearestFood.getX(), nearestFood.getY());
+            score += (400.0 / (d + 1)) * diff.foodWeight * nearestFood.getValue();
+            if (d == 0) score += 6000 * diff.foodWeight;
+        }
+
+        // 5) Hunting / cutting off opponents (hard & impossible only).
+        if (diff.hunt) {
+            score += huntingBonus(bot, next, snakes, occupied, diff);
+        }
+
+        // 6) Personality noise - zero for impossible so it plays at its ceiling.
+        if (diff != Difficulty.IMPOSSIBLE) {
+            score += RANDOM.nextDouble() * (diff == Difficulty.EASY ? 200 : 40);
+        }
+
+        return score;
+    }
+
+    /**
+     * Rewards moves that shrink an opponent's reachable space (walling them
+     * in / cutting off their escape) WITHOUT reducing our own safety below a
+     * safe threshold. This is the bot's real "kill" mechanism - it never
+     * chases head-on collisions because those are mutual deaths here, not
+     * wins. A true 1v1v1v1 mindset: prefer moves that hurt the opponent's
+     * options over moves that only help us, when both are otherwise safe.
+     */
+    private static double huntingBonus(Snake bot, Point myNext, List<Snake> snakes, Set<Point> occupied, Difficulty diff) {
+        double bonus = 0;
+        int myLen = bot.getSegments().size();
+
+        for (Snake opp : snakes) {
+            if (opp == bot || !opp.isAlive()) continue;
+            Point oppHead = opp.getHead();
+            if (oppHead == null) continue;
+
+            int distToOpp = manhattan(myNext, oppHead.getX(), oppHead.getY());
+            if (distToOpp > 9) continue; // only worth planning against nearby threats
+
+            Set<Point> before = new HashSet<>(occupied);
+            int oppSpaceBefore = floodFill(oppHead, before, 200);
+
+            Set<Point> after = new HashSet<>(occupied);
+            after.add(myNext);
+            int oppSpaceAfter = floodFill(oppHead, after, 200);
+
+            int reduction = oppSpaceBefore - oppSpaceAfter;
+            if (reduction > 0) {
+                // Cutting off a same-size-or-smaller opponent is safer and
+                // more decisive than poking at a bigger one.
+                double sizeFactor = opp.getSegments().size() <= myLen ? 1.3 : 0.75;
+                bonus += reduction * 20 * sizeFactor * diff.foodWeight;
+            }
+            // Finishing-move bonus: opponent is down to almost no room.
+            if (oppSpaceAfter <= 3 && oppSpaceBefore > 3) {
+                bonus += 3500;
             }
         }
-        
+        return bonus;
+    }
+
+    // ---------------------------------------------------------------
+    // Flood fill (BFS reachable free-cell count, capped for performance)
+    // ---------------------------------------------------------------
+    private static int floodFill(Point start, Set<Point> blocked, int cap) {
+        if (start == null || isWall(start) || blocked.contains(start)) return 0;
+        boolean[][] visited = new boolean[GRID_SIZE][GRID_SIZE];
+        Deque<Point> queue = new ArrayDeque<>();
+        queue.add(start);
+        visited[start.getX()][start.getY()] = true;
+        int count = 0;
+        int[] dx = {0, 0, -1, 1};
+        int[] dy = {-1, 1, 0, 0};
+
+        while (!queue.isEmpty() && count < cap) {
+            Point p = queue.poll();
+            count++;
+            for (int i = 0; i < 4; i++) {
+                int nx = p.getX() + dx[i];
+                int ny = p.getY() + dy[i];
+                if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+                if (visited[nx][ny]) continue;
+                Point np = new Point(nx, ny);
+                if (blocked.contains(np)) continue;
+                visited[nx][ny] = true;
+                queue.add(np);
+            }
+        }
+        return count;
+    }
+
+    private static int countImmediateEscapes(Point head, Set<Point> occupied) {
+        int routes = 0;
+        for (String dir : new String[]{"UP", "DOWN", "LEFT", "RIGHT"}) {
+            Point n = step(head, dir);
+            if (n != null && !isWall(n) && !occupied.contains(n)) routes++;
+        }
         return routes;
     }
-    
-    private static boolean isInDangerZoneSimple(Point pos, Snake bot, GameState state) {
-        if (pos == null) return true;
-        int x = pos.getX();
-        int y = pos.getY();
-        
-        // Simple danger zone: very close to walls
-        if (x < 3 || x > 27 || y < 3 || y > 27) {
-            return true;
+
+    // ---------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------
+    private static Set<Point> collectOccupied(Snake bot, List<Snake> snakes) {
+        Set<Point> occupied = new HashSet<>();
+        for (Snake s : snakes) {
+            if (!s.isAlive()) continue;
+            // Crossing your OWN body is allowed (hybrid .io rule - see
+            // GameEngine: bodyOwner != attacker). So our own segments are
+            // never a blocking cell.
+            if (s == bot) continue;
+            List<Point> segs = s.getSegments();
+            // Mirror GameEngine's bodyOccupancy exactly: skip the opponent's
+            // head (index 0 - head-ons handled separately). The tail vacates
+            // this tick UNLESS the opponent is growing, so a chaser up the
+            // same row must treat a growing snake's tail as a body wall.
+            int tailIdx = s.getGrowthPoints() > 0 ? segs.size() : segs.size() - 1;
+            for (int i = 1; i < Math.max(tailIdx, 1); i++) occupied.add(segs.get(i));
         }
-        
-        // CRITICAL: Check for opponent body collisions - cannot move into opponent bodies
-        // This prevents bots from passing through opponents
-        for (Snake other : state.getSnakes()) {
-            if (other == bot || !other.isAlive()) continue;
-            if (other.getSegments().contains(pos)) {
-                return true; // Position occupied by opponent body
-            }
+        return occupied;
+    }
+
+    /** Light 1-tick prediction: assume each opponent keeps its current heading. */
+    private static Set<Point> predictOpponentHeads(Snake bot, List<Snake> snakes) {
+        Set<Point> predicted = new HashSet<>();
+        for (Snake s : snakes) {
+            if (s == bot || !s.isAlive()) continue;
+            Point head = s.getHead();
+            if (head == null) continue;
+            Point next = step(head, s.getDirection());
+            if (next != null) predicted.add(next);
         }
-        
-        return false;
+        return predicted;
     }
-    
-    private static boolean isDecisionPoint(Snake bot, Point next, GameState state) {
-        // We're at a decision point if we have multiple reasonable options
-        List<Point> segments = bot.getSegments();
-        if (segments.size() < 5) return false;
-        
-        int similarPaths = 0;
-        String currentDir = bot.getDirection();
-        String[] dirs = {"UP", "DOWN", "LEFT", "RIGHT"};
-        
-        for (String dir : dirs) {
-            if (isReverse(dir, currentDir)) continue;
-            Point testNext = step(segments.get(0), dir);
-            if (testNext == null) continue;
-            
-            if (isWall(testNext)) continue;
-            
-            // Check collision with own body
-            boolean collidesWithOwnBody = false;
-            for (int i = 2; i < segments.size() - 1; i++) {
-                if (segments.get(i).equals(testNext)) {
-                    collidesWithOwnBody = true;
-                    break;
-                }
-            }
-            
-            if (!collidesWithOwnBody) {
-                similarPaths++;
-            }
-        }
-        
-        return similarPaths >= 2;
+
+    private static boolean isWall(Point p) {
+        return p.getX() < 0 || p.getX() >= GRID_SIZE || p.getY() < 0 || p.getY() >= GRID_SIZE;
     }
-    
-    private static double alternativePathBonus(Snake bot, Point next, List<Food> foods, GameState state, double difficulty) {
-        double bonus = 0;
-        Point head = bot.getHead();
-        
-        // Look for food that might be better to target even if slightly farther
-        for (Food food : foods) {
-            int directDistance = manhattan(next, food.getX(), food.getY());
-            
-            // Check if there's a shorter path via turning around or repositioning
-            String currentDir = bot.getDirection();
-            String oppositeDir = isReverse(currentDir, "UP") ? "DOWN" : 
-                                isReverse(currentDir, "DOWN") ? "UP" : 
-                                isReverse(currentDir, "LEFT") ? "RIGHT" : "LEFT";
-            
-            Point reposition = step(head, oppositeDir);
-            if (reposition == null) continue;
-            
-            int repositionDistance = manhattan(reposition, food.getX(), food.getY());
-            
-            // If repositioning gives us a much better angle to the food
-            if (repositionDistance < directDistance * 0.7 && repositionDistance < MAX_LOOKAHEAD_DISTANCE) {
-                // Bonus for alternative path planning
-                bonus += (directDistance - repositionDistance) * 2.0 * difficulty * EXPLORATION_PRIORITY;
-            }
-        }
-        
-        return bonus;
-    }
-    
-    private static double getDangerMultiplier(String strategy) {
-        switch (strategy) {
-            case "defensive": return 3.0;
-            case "aggressive": return 0.5;
-            case "foodie": return 1.0;
-            default: return 1.0;
-        }
-    }
-    
-    private static double simulateLookahead(Snake bot, Point next, List<Food> foods, GameState state, double difficulty, String strategy, int depth, double discount) {
-        if (depth <= 0) return 0;
-        
-        double bestScore = Double.NEGATIVE_INFINITY;
-        String[] dirs = {"UP", "DOWN", "LEFT", "RIGHT"};
-        
-        for (String d : dirs) {
-            if (isReverse(d, bot.getDirection())) continue;
-            Point futureNext = step(next, d);
-            if (futureNext == null || isWall(futureNext) || isInDangerZoneSimple(futureNext, bot, state)) continue;
-            
-            boolean bodyCollision = false;
-            for (Snake other : state.getSnakes()) {
-                if (other == bot || !other.isAlive()) continue;
-                for (Point seg : other.getSegments()) {
-                    if (seg.equals(futureNext)) {
-                        bodyCollision = true;
-                        break;
-                    }
-                }
-                if (bodyCollision) break;
-            }
-            if (bodyCollision) continue;
-            
-            double futureScore = 0;
-            
-            Food nearest = nearestFood(futureNext, foods);
-            if (nearest != null) {
-                int dist = manhattan(futureNext, nearest.getX(), nearest.getY());
-                if (dist < 5) futureScore += (5 - dist) * 2.0 * difficulty * discount;
-            }
-            
-            futureScore += (15 - Math.abs(futureNext.getX() - 15)) * 0.06 * discount;
-            
-            if (depth > 1) {
-                futureScore += simulateLookahead(bot, futureNext, foods, state, difficulty, strategy, depth - 1, discount * 0.5);
-            }
-            
-            if (futureScore > bestScore) {
-                bestScore = futureScore;
-            }
-        }
-        
-        return bestScore == Double.NEGATIVE_INFINITY ? -1000 * difficulty : bestScore;
-    }
-    
-    private static double getStrategyBonus(Snake bot, Point next, GameState state, String strategy, double difficulty) {
-        double bonus = 0;
-        
-        switch (strategy) {
-            case "defensive":
-                // Bonus for moving near other snakes' tails
-                int tailDistance = Integer.MAX_VALUE;
-                for (Snake other : state.getSnakes()) {
-                    if (other == bot || !other.isAlive()) continue;
-                    List<Point> segments = other.getSegments();
-                    if (!segments.isEmpty()) {
-                        Point tail = segments.get(segments.size() - 1);
-                        int d = manhattan(next, tail.getX(), tail.getY());
-                        if (d < tailDistance) tailDistance = d;
-                    }
-                }
-                if (tailDistance < 3) bonus += 2000 * difficulty;
-                break;
-                
-            case "aggressive":
-                // Bonus for head-on opportunities
-                for (Snake other : state.getSnakes()) {
-                    if (other == bot || !other.isAlive()) continue;
-                    Point otherHead = other.getHead();
-                    if (otherHead == null) continue;
-                    Point predicted = step(otherHead, other.getDirection());
-                    if (predicted != null && predicted.equals(next)) {
-                        if (other.getSegments().size() < bot.getSegments().size()) {
-                            bonus += 5000 * difficulty;
-                        }
-                    }
-                }
-                break;
-                
-            case "foodie":
-                // Bonus for moving near food clusters
-                int nearbyFood = 0;
-                for (Food f : state.getFoods()) {
-                    if (manhattan(next, f.getX(), f.getY()) <= 2) {
-                        nearbyFood++;
-                    }
-                }
-                bonus += nearbyFood * 1200 * difficulty;
-                break;
-        }
-        
-        return bonus;
-    }
-    
-    private static boolean isWall(Point pos) {
-        return pos.getX() < 0 || pos.getX() >= 30 || pos.getY() < 0 || pos.getY() >= 30;
-    }
-    
-    private static boolean isInSafeZone(Point pos, Snake bot) {
-        if (pos == null) return false;
-        int x = pos.getX();
-        int y = pos.getY();
-        
-        // Safe zone: near walls but not too close
-        boolean nearLeftWall = x < 5 && x >= 0;
-        boolean nearRightWall = x >= 25 && x <= 29;
-        boolean nearTopWall = y < 5 && y >= 0;
-        boolean nearBottomWall = y >= 25 && y <= 29;
-        
-        return nearLeftWall || nearRightWall || nearTopWall || nearBottomWall;
-    }
-    
+
     private static boolean isReverse(String dir, String current) {
         return switch (dir) {
             case "UP" -> "DOWN".equals(current);
@@ -605,7 +306,7 @@ public class AdvancedBotManager {
             default -> false;
         };
     }
-    
+
     private static Point step(Point head, String dir) {
         int x = head.getX(), y = head.getY();
         switch (dir) {
@@ -617,45 +318,25 @@ public class AdvancedBotManager {
         }
         return new Point(x, y);
     }
-    
+
     private static int manhattan(Point p, int x, int y) {
         return Math.abs(p.getX() - x) + Math.abs(p.getY() - y);
     }
-    
+
     private static Food nearestFood(Point p, List<Food> foods) {
         if (foods == null || foods.isEmpty()) return null;
         Food nearest = null;
         int best = Integer.MAX_VALUE;
         for (Food f : foods) {
             int d = manhattan(p, f.getX(), f.getY());
-            if (d < best) {
-                best = d;
-                nearest = f;
-            }
+            if (d < best) { best = d; nearest = f; }
         }
         return nearest;
     }
-    
-    private static boolean isOnSameSpot(Snake bot, Point next, Food food) {
-        // Check if the bot would eat food by moving to next position
-        if (next == null || food == null) return false;
-        return next.getX() == food.getX() && next.getY() == food.getY();
-    }
-    
-    private static String getDirectionFromPoints(Point from, Point to) {
-        if (to.getX() > from.getX()) return "RIGHT";
-        if (to.getX() < from.getX()) return "LEFT";
-        if (to.getY() > from.getY()) return "DOWN";
-        if (to.getY() < from.getY()) return "UP";
-        return "RIGHT"; // Default
-    }
-    
-    private static class DirectionScore {
-        String dir;
-        double score;
-        DirectionScore(String dir, double score) {
-            this.dir = dir;
-            this.score = score;
-        }
+
+    private static class ScoredMove {
+        final String dir;
+        final double score;
+        ScoredMove(String dir, double score) { this.dir = dir; this.score = score; }
     }
 }

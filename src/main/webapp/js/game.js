@@ -81,12 +81,17 @@
     var swipeStartY = 0;
 
     var countdownBuffers = { 3: null, 2: null, 1: null, gameover: null };
-    var countdownSoundsPlayed = { 3: false, 2: false, 1: false };
     var soundsLoading = 0;
     var lastCountdownValue = -1;
     var lastPlayTime = { 3: 0, 2: 0, 1: 0 };
     var wasGameOver = false;
     var lastCountdownPlayTime = 0;
+    var countdownRetries = { 3: 0, 2: 0, 1: 0 };
+    var lastServerTick = -1;
+    // countdown.ogg is ALREADY a full 4-beep "3-2-1-Go" clip (beeps at 0/1/2/3s).
+    // It must be played once per countdown, not once per number, so we track
+    // that single play here instead of a per-number flag.
+    var countdownClipPlayed = false;
 
     // Message queue for when WebSocket is connecting
     var wsMessageQueue = [];
@@ -357,8 +362,13 @@
         }
         syncSettingsUI();
         wireUi();
-        initAudio();
-        loadGameSounds();
+
+        // Do NOT create the AudioContext here: it has no user gesture yet, so
+        // the context stays suspended, and any sound scheduled on it (3-2-1
+        // countdown, game-over stinger) would only be heard LATER, right after
+        // the context finally resumes on a future gesture — the "sound plays
+        // even after it already happened" bug. Audio is created on the first
+        // real gesture, inside initAudioOnce().
 
         Ajax.post('api/game', {
             action: 'join',
@@ -379,17 +389,29 @@
         document.addEventListener('keydown', handleKeyDown);
         document.addEventListener('keyup', handleKeyUp);
         
-        // Initialize audio on first user interaction (click OR keydown)
+        // Initialize audio on the first real user gesture (click, tap OR
+        // keydown). Creating the context inside this handler keeps it in the
+        // 'running' state, so all scheduled sounds play immediately, on time.
         var audioInitDone = false;
         function initAudioOnce() {
             if (!audioInitDone) {
                 audioInitDone = true;
                 initAudio();
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    try { audioCtx.resume(); } catch (e) {}
+                }
+                loadGameSounds();
+                document.removeEventListener('pointerdown', initAudioOnce);
                 document.removeEventListener('click', initAudioOnce);
+                document.removeEventListener('touchstart', initAudioOnce);
+                document.removeEventListener('touchend', initAudioOnce);
                 document.removeEventListener('keydown', initAudioOnce);
             }
         }
+        document.addEventListener('pointerdown', initAudioOnce, { once: true });
         document.addEventListener('click', initAudioOnce, { once: true });
+        document.addEventListener('touchstart', initAudioOnce, { once: true });
+        document.addEventListener('touchend', initAudioOnce, { once: true });
         document.addEventListener('keydown', initAudioOnce, { once: true });
 
         var readyBtn = document.getElementById('touchReadyBtn');
@@ -749,6 +771,15 @@
         if (!data || data.action === 'pong') return;
         var now = performance.now();
 
+        // Detect a NEW round so one-time sounds (3-2-1 countdown, game-over
+        // stinger) reset cleanly per round. The server creates a fresh
+        // GameState (tick=0) on every resetGame+startGame, so a tick rollback
+        // is a reliable signal that a fresh countdown is beginning.
+        if (typeof data.tick === 'number' && lastServerTick > 0 && data.tick < lastServerTick) {
+            resetCountdownSounds();
+        }
+        if (typeof data.tick === 'number') lastServerTick = data.tick;
+
         if (interpStart > 0) {
             interpDuration = Math.min(now - interpStart, 200);
         }
@@ -799,14 +830,27 @@
         serverFoods = foodsData ? foodsData.map(function(f) { return { x: f.x, y: f.y, type: f.type || 'NORMAL' }; }) : [];
         countdown = data.countdown;
 
+        // A new countdown phase (3-2-1 of the next round) begins right after an
+        // idle/gameplay/game-over value, never while the previous countdown is
+        // still running. Reset the per-round flags here so 3-2-1 is played once
+        // (and only once) for each countdown.
+        if (countdown > 0 && !(lastCountdownValue > 0)) {
+            resetCountdownSounds();
+        }
+
         console.log('[Sound] Received countdown:', countdown, 'gameStarted:', data.gameStarted, 'lastCountdownValue:', lastCountdownValue);
 
-        // Play countdown sounds (3, 2, 1) - only when value changes to prevent duplicates
+        // Play countdown sound - countdown.ogg is the WHOLE 3-2-1-Go clip (4 beeps,
+        // one per second), so it is played only once when the countdown starts
+        // (the first countdown value seen). Playing it again for 2 and 1 would
+        // stack the whole 4-beep clip every second -> the endless repeating
+        // beep wall. The clip's internal 0/1/2/3s beeps line up with the
+        // server's 3-2-1-Go as long as we start it at the first value.
         if (countdown !== lastCountdownValue) {
-            if (countdown >= 1 && countdown <= 3 && !countdownSoundsPlayed[countdown]) {
-                console.log('[Sound] Playing countdown:', countdown);
-                playCountdownSound(countdown);
-                countdownSoundsPlayed[countdown] = true;
+            if (countdown >= 1 && countdown <= 3 && !countdownClipPlayed) {
+                console.log('[Sound] Playing countdown clip (3-2-1-Go), started at:', countdown);
+                playCountdownSound(3);
+                countdownClipPlayed = true;
             }
             lastCountdownValue = countdown;
         }
@@ -827,14 +871,20 @@
                 var my = findMySnake(data.snakes);
                 if (my) saveScore(my.score || 0);
             }
-            if (audioCtx) playBeep(200, 0.5, 'sawtooth', 0.06);
-            // Only play game over sound on transition from not gameOver to gameOver
+            // Play the game-over stinger (beep + wav) exactly once per round.
+            // Both are guarded together and wasGameOver is only cleared when a
+            // new round begins, so reconnect/re-broadcast payloads can never
+            // retrigger the sound on the same game-over screen.
             if (!wasGameOver) {
+                if (audioCtx) playBeep(200, 0.5, 'sawtooth', 0.06);
                 playGameOverSound();
+                wasGameOver = true;
             }
-            wasGameOver = true;
         } else {
-            wasGameOver = false;
+            // Do NOT reset wasGameOver here. Clearing it on every non-game-over
+            // payload lets a late/repeated game-over broadcast (e.g. after a
+            // reconnect) re-trigger the stinger repeatedly. It is only cleared
+            // when a fresh round's countdown begins (resetCountdownSounds).
             // New round / countdown / waiting payload: drop the previous
             // game-over snapshot and clear any leftover round timer.
             finalResult = null;
@@ -846,11 +896,6 @@
                 if (!gameStarted) {
                     startTime = Date.now(); // timer starts on round start (BUG 4: timer)
                     if (audioCtx) playBeep(660, 0.1, 'square', 0.06);
-                    // Only reset countdown if a NEW countdown is starting (countdown > 0)
-                    // If countdown is 0 or -1, game is already in progress (reconnect with stale state)
-                    if (data.countdown > 0) {
-                        resetCountdownSounds();
-                    }
                 }
                 gameOver = false;
                 gameStarted = true;
@@ -869,7 +914,8 @@
                 if (!s.alive && prevState && prevState[s.name] && prevState[s.name].alive) {
                     var head = s.segments && s.segments[0];
                     if (head) spawnParticles(head.x, head.y, '#e94560', 15, 80);
-                    if (audioCtx) playBeep(300, 0.25, 'sawtooth', 0.05);
+                    // Throttled low thud; bot rooms produce frequent deaths.
+                    playSfx(300, 0.25, 'sawtooth', 0.05);
                 }
             }
         }
@@ -894,7 +940,9 @@
                     }
                     if (isNew) {
                         spawnParticles(food.x, food.y, food.type === 'GOLDEN' ? '#ffd700' : '#ff4444', 10, 50);
-                        if (audioCtx) playBeep(food.type === 'GOLDEN' ? 880 : 660, 0.08, 'square', 0.05);
+                        // Only the rarer GOLDEN food dings (throttled); normal
+                        // food spawns constantly with boost trails / bot play.
+                        if (food.type === 'GOLDEN') playSfx(880, 0.08, 'square', 0.06);
                     }
                 }
             }
@@ -1291,18 +1339,35 @@
 
     // ---------- audio ----------
 
+    // The AudioContext must only be created after a user gesture (click/tap/
+    // keydown). Creating it earlier leaves the context `suspended`, and any
+    // source scheduled with start(0) then plays LATER (whenever a gesture
+    // finally resumes it) — the cause of countdown/game-over sounds being
+    // heard after the fact, out of sync, repeating. So we create it lazily
+    // inside the first-gesture handler (see initAudioOnce) and never schedule
+    // sound on a suspended context.
     function initAudio() {
         try {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
         } catch (e) {}
+    }
+
+    // True only when audio can actually be heard RIGHT NOW: context exists,
+    // sound is enabled, and the context is running. While suspended we refuse
+    // to schedule anything — audios queued on a suspended context are the
+    // source of the delayed "already happened" sound replay bug.
+    function audioRunning() {
+        if (!audioCtx || !soundEnabled) return false;
+        if (audioCtx.state !== 'running') {
+            try { audioCtx.resume(); } catch (e) {}
+            return false;
+        }
+        return true;
     }
 
     // BUG 4: sound setting — muted players produce no beeps at all
     function playBeep(freq, duration, type, volume) {
-        if (!audioCtx || !soundEnabled) return;
+        if (!audioRunning()) return;
         try {
             var osc = audioCtx.createOscillator();
             var gain = audioCtx.createGain();
@@ -1315,6 +1380,18 @@
             osc.start();
             osc.stop(audioCtx.currentTime + duration);
         } catch (e) {}
+    }
+
+    // Ambient in-game sounds (food pickups, bot deaths) can fire dozens of
+    // times per second, which gets unbearably noisy. playSfx throttles these
+    // to at most one per second-period, while the important one-shot sounds
+    // (round countdown, round-start, game-over) use playBeep directly.
+    var lastSfxAt = 0;
+    function playSfx(freq, duration, type, volume) {
+        var now = Date.now();
+        if (now - lastSfxAt < 300) return;
+        lastSfxAt = now;
+        playBeep(freq, duration, type, volume);
     }
 
     var countdownBuffers = { 3: null, 2: null, 1: null, gameover: null };
@@ -1351,8 +1428,21 @@
     }
 
     function playCountdownSound(num) {
-        if (!soundEnabled || !audioCtx) { console.log('[Sound] playCountdownSound skipped - disabled or no audioCtx'); return; }
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (!audioRunning()) {
+            // The AudioContext can unlock a fraction of a second AFTER the first
+            // countdown broadcast (user just tapped Ready). Retry a couple of
+            // times so the leading beep (usually 3) is not silently dropped.
+            if ((countdownRetries[num] || 0) < 3) {
+                countdownRetries[num] = (countdownRetries[num] || 0) + 1;
+                var retryNum = num;
+                setTimeout(function() {
+                    playCountdownSound(retryNum);
+                }, 180);
+            } else {
+                console.log('[Sound] playCountdownClip skipped (not running)');
+            }
+            return;
+        }
         
         var buffer = countdownBuffers[num];
         if (!buffer) { console.log('[Sound] No buffer for:', num, '(loading:', soundsLoading + ')'); return; }
@@ -1384,8 +1474,7 @@
     }
 
     function playGameOverSound() {
-        if (!soundEnabled || !audioCtx) { console.log('[Sound] playGameOverSound skipped'); return; }
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (!audioRunning()) { console.log('[Sound] playGameOverSound skipped (not running)'); return; }
         
         var buffer = countdownBuffers.gameover;
         if (!buffer) { console.log('[Sound] No gameover buffer'); return; }
@@ -1402,12 +1491,16 @@
         } catch (e) { console.log('[Sound] Game over error:', e); }
     }
 
+    // Per-round sound reset. Called when a NEW round's countdown begins (tick
+    // rollback or first positive countdown value), so the 3-2-1 countdown and
+    // game-over stinger are each played exactly once per round.
     function resetCountdownSounds() {
-        countdownSoundsPlayed = { 3: false, 2: false, 1: false };
+        countdownClipPlayed = false;
         lastCountdownValue = -1;
         lastPlayTime = { 3: 0, 2: 0, 1: 0 };
-        wasGameOver = false;
         lastCountdownPlayTime = 0;
+        countdownRetries = { 3: 0, 2: 0, 1: 0 };
+        wasGameOver = false;
     }
 
     // ---------- particles ----------
