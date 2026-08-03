@@ -130,14 +130,16 @@ src/main/java/com/snake/game/
 - Maven 3.9+
 - PostgreSQL 14+
 - Tomcat 11+ (or use `mvn jetty:run`)
-
 ### Environment Variables
+
 ```bash
 export DB_URL=jdbc:postgresql://localhost:5432/snake_game
 export DB_USER=postgres
 export DB_PASSWORD=your_password
 export JWT_SECRET=$(openssl rand -base64 32)  # 32+ chars for HS256
 ```
+
+> **Note:** The `JWT_SECRET` line above generates a random secret for demonstration. **Replace this with your actual JWT secret** in production (set via environment variables or secure configuration management). Never commit actual secrets to version control.
 
 ### Build & Run
 ```bash
