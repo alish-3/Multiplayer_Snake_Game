@@ -9,6 +9,7 @@
 ![WebSocket](https://img.shields.io/badge/WebSocket-2.1-green)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-blue?logo=postgresql)
 ![Maven](https://img.shields.io/badge/Maven-3.9%2B-red?logo=apachemaven)
+[![CI](https://github.com/alish-3/Multiplayer_Snake_Game/actions/workflows/ci.yml/badge.svg)](https://github.com/alish-3/Multiplayer_Snake_Game/actions)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
@@ -168,6 +169,8 @@ Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
 
 ### Share it live (ngrok)
 
+> **Status (2026-08-05): live** — currently running at https://predefine-imaginary-deniable.ngrok-free.dev (Jetty 12 + local PostgreSQL + ngrok). Free tier: URL changes if ngrok restarts.
+
 1. Make sure the stack is running locally (Option 3 Docker, or Jetty + local PostgreSQL)
 2. `ngrok http 8080` (first time: create a free account at ngrok.com, then `ngrok config add-authtoken <token>`)
 3. Share the printed `https://<subdomain>.ngrok-free.app` URL — gameplay, REST API and WebSocket all work through the tunnel (the client builds WebSocket URLs from window.location, so wss:// is automatic)
@@ -318,7 +321,7 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 |-------|-----|
 | Boost coins/milestones/hybrid-boost logic untested | Extracted `timedBoostCoinReward`, `applyScoreMilestoneCoins`, `applyHybridBoost` into testable methods; added `GameEngineBoostTest` (12/12); `mvn test` now 21/21 |
 | Stale boost docs (3×/5%/spend-coins design that no longer exists) | PKB.md rewritten to match the hybrid-boost design; README updated in this pass |
-| No deployment path | Dockerfile + docker-compose.yml + GitHub Actions CI + ngrok runbook added |
+| No deployment path | Dockerfile + docker-compose.yml + GitHub Actions CI + ngrok runbook added; CI Run #1 green (21/21 tests + WAR artifact); deployed live via ngrok — https://predefine-imaginary-deniable.ngrok-free.dev (Docker container run pending — virtualization disabled in BIOS) |
 
 ### 🔧 In Progress / Planned
 
@@ -350,7 +353,7 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 - [x] **Jetty 12 upgrade** — Dev server matches Servlet 6.0/WebSocket 2.1; hot reload fixed
 - [x] **Project Knowledge Base** — `PKB.md` added; docs updated to current structure
 - [x] **Phase 0 — Test coverage** — Boost coins/milestones/hybrid-boost unit tests (GameEngineBoostTest 12/12; `mvn test` 21/21 green)
-- [x] **Phase 1 — Deployment scaffold** — Docker (multi-stage + compose), GitHub Actions CI, ngrok runbook
+- [x] **Phase 1 — Deployment** — Docker scaffold (multi-stage + compose), GitHub Actions CI green (Run #1), live ngrok URL (https://predefine-imaginary-deniable.ngrok-free.dev; Docker run pending BIOS enable)
 
 ### 🎯 Next Milestones
 

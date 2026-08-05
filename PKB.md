@@ -340,10 +340,10 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 - [x] Done-check: `mvn test` green (21/21: 12 boost + 4 collision + 5 growth)
 
 **Phase 1 — Reach (make it playable by others)**
-- [ ] Docker: multi-stage WAR build + `docker-compose.yml` (app + PostgreSQL)
-- [ ] GitHub Actions CI: `mvn clean test` + package on every push
-- [ ] Deploy once via ngrok (`ngrok http 8080` → local server) → live playable URL
-- [ ] Done-check: fresh clone + `docker compose up` runs; CI green; URL playable
+- [x] Docker: multi-stage WAR build + `docker-compose.yml` (app + PostgreSQL)
+- [x] GitHub Actions CI: `mvn clean test` + package on every push
+- [x] Deploy once via ngrok (`ngrok http 8080` → local server) → live playable URL
+- [~] Done-check: CI green ✓; URL playable ✓ (Jetty + local PostgreSQL + ngrok); fresh-clone `docker compose up` pending (BIOS virtualization blocker on dev machine)
 
 **Phase 2 — Hardening & observability**
 - [ ] `/api/health` endpoint + active-room/connection metrics
@@ -382,6 +382,7 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 | Game freezes mid-round (old builds) | Known NPE fixed 2026-08-01; `tick()` now logs exceptions — check server log |
 | Bots not moving | Room code / player names must match; server running on expected port |
 | WebSocket connection fails | Verify server port (Jetty :8080 via pom `jetty.port`) |
+| Live URL down / changed | ngrok stopped or restarted → free-tier URL changes; restart `ngrok http 8080` and re-share the new https://<subdomain>.ngrok-free.app URL |
 
 ### Git history note
 
@@ -412,7 +413,12 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 ```
 .
 ├── pom.xml                          # Maven WAR build, Jetty 12 ee10 dev plugin (:8080)
+├── .dockerignore
+├── .env.example                     # Template for DB_PASSWORD / JWT_SECRET
+├── .github/workflows/ci.yml         # CI — mvn clean test + package on push/PR
 ├── .gitignore
+├── Dockerfile                       # Multi-stage Maven→Tomcat 11 build
+├── docker-compose.yml               # App + PostgreSQL stack
 ├── README.md                        # Public overview + media showcase
 ├── PKB.md                           # This document
 ├── bot.ps1                          # PowerShell AI bot launcher
@@ -447,7 +453,9 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 - `mvn jetty:run` → Jetty 12.0.16 boots webapp on :8080, scan=5 accepted (no plugin warnings)
 - `mvn test` → 21/21 pass (12 boost + 4 collision + 5 gated-growth)
 - Phase 0 complete (2026-08-05): boost coins/milestones/hybrid-boost unit tests added (GameEngineBoostTest 12/12)
-- Git: `main`; PKB.md modified (docs update pending)
+- Phase 1 complete (2026-08-05): commit 0ab74eb pushed; CI Run #1 green (21/21 tests + WAR artifact); live at https://predefine-imaginary-deniable.ngrok-free.dev (Jetty + local PostgreSQL + ngrok)
+- Docker container run pending — virtualization disabled in BIOS (WSL2/Docker Desktop not started)
+- Git: `main`; latest commit 0ab74eb (Phase 0 + Phase 1 scaffold + docs)
 
 ---
 
