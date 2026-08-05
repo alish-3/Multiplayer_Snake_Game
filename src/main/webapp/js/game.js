@@ -490,7 +490,7 @@
                 if (data && data.action === 'pong') {
                     lastPongAt = Date.now();
                     var latency = Date.now() - (data.t || lastPongAt);
-                    var txt = latency < 10 ? '<10ms' : latency + 'ms';
+                    var txt = latency < 10 ? '<10' : String(latency);
                     setText('pingVal', txt);
                     setText('mobilePingVal', txt);
                     return;
@@ -629,19 +629,41 @@
 
     // BUG 5 fix: swipe gestures bind to #swipeArea (only visible in swipe mode),
     // so the D-Pad and swipe area never fight over the canvas.
+    // Low-latency: direction fires DURING touchmove as soon as the finger crosses
+    // the threshold — no waiting for finger lift; mid-gesture direction changes
+    // are sent as soon as the dominant axis flips.
+    var SWIPE_THRESHOLD = 12;
     function setupSwipe() {
         var area = document.getElementById('swipeArea');
         if (!area || area._swipeBound) return;
         area._swipeBound = true;
-        var startX = 0, startY = 0;
+        var startX = 0, startY = 0, lastSwipeDir = null;
         area.addEventListener('touchstart', function(e) {
             e.preventDefault();
             var t = e.touches[0];
             startX = t.clientX;
             startY = t.clientY;
+            lastSwipeDir = null;
         }, { passive: false });
         area.addEventListener('touchmove', function(e) {
             e.preventDefault();
+            if (!gameStarted || gameOver) return;
+            var t = e.touches[0];
+            var dx = t.clientX - startX;
+            var dy = t.clientY - startY;
+            var absDx = Math.abs(dx);
+            var absDy = Math.abs(dy);
+            if (Math.max(absDx, absDy) < SWIPE_THRESHOLD) return;
+            var dir;
+            if (absDx > absDy) {
+                dir = dx > 0 ? 'RIGHT' : 'LEFT';
+            } else {
+                dir = dy > 0 ? 'DOWN' : 'UP';
+            }
+            if (dir !== lastSwipeDir) {
+                lastSwipeDir = dir;
+                sendDirection(dir);
+            }
         }, { passive: false });
         area.addEventListener('touchend', function(e) {
             e.preventDefault();
@@ -650,18 +672,6 @@
                 startX = 0;
                 startY = 0;
                 return;
-            }
-            if (startX === 0 && startY === 0) return;
-            var t = e.changedTouches[0];
-            var dx = t.clientX - startX;
-            var dy = t.clientY - startY;
-            var absDx = Math.abs(dx);
-            var absDy = Math.abs(dy);
-            if (Math.max(absDx, absDy) < 15) return;
-            if (absDx > absDy) {
-                sendDirection(dx > 0 ? 'RIGHT' : 'LEFT');
-            } else {
-                sendDirection(dy > 0 ? 'DOWN' : 'UP');
             }
             startX = 0;
             startY = 0;

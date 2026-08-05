@@ -93,3 +93,16 @@ screenshot-*.txt
 
 # Duplicate root js folder (use src/main/webapp/js/ instead)
 js/
+
+# Local env file for docker-compose (never commit real secrets)
+.env
+
+# System & editor noise
+*.tmp
+*.bak
+*.orig
+*.rej
+*~
+*.swp
+*.hprof
+hs_err_pid*

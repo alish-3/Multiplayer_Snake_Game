@@ -21,6 +21,13 @@ public class GameEngine {
     private static final int BOOST_MIN_LENGTH = 5;       // cannot boost below this many segments
     private static final int BOOST_SHED_INTERVAL_TICKS = 2; // shed 1 segment every 2 ticks (~300ms)
     private static final int MAX_FOODS = 80;             // cap on food/orbs so boost trails can't explode
+    private static final int GATE_GROWTH_SCORE = 100;    // growth gates above this score
+
+    // Boost coin / milestone constants
+    private static final int BOOST_COIN_TIME_REWARD = 10;    // +10 coins every 5s of play
+    private static final long BOOST_COIN_INTERVAL_MS = 5000; // 5 seconds between time-based coin rewards
+    private static final int BOOST_COIN_MILESTONE_REWARD = 50; // +50 coins per score milestone reached
+    private static final int[] SCORE_MILESTONES = {100, 500, 1000};
 
     public static void startGame(Room room) {
         if (activeGames.containsKey(room.getCode())) {
@@ -171,13 +178,14 @@ public class GameEngine {
             
                     // Auto-refill boost coins when snake grows (every 5 seconds)
             Long gameStartTimeObj = gameStartTimes.get(room.getCode());
-            long now = System.currentTimeMillis();
             if (gameStartTimeObj != null) {
                 long gameStartTime = gameStartTimeObj;
                 String roomCode = room.getCode();
+                long now = System.currentTimeMillis();
                 long lastGrowthTime = growthTimers.getOrDefault(roomCode, 0L);
-                if (now - gameStartTime >= 5000 && now - lastGrowthTime >= 5000) {
-                    state.setBoostCoins(state.getBoostCoins() + 10);
+                int timedReward = timedBoostCoinReward(now, gameStartTime, lastGrowthTime);
+                if (timedReward > 0) {
+                    state.setBoostCoins(state.getBoostCoins() + timedReward);
                     growthTimers.put(roomCode, now);
                 }
             }
@@ -201,49 +209,16 @@ public class GameEngine {
         }
         
         Map<String, Long> milestones = lastScoreMilestoneCheck.getOrDefault(roomCode, new HashMap<String, Long>());
-        long now = System.currentTimeMillis();
-        
+
         for (Snake snake : snakes) {
-            int score = snake.getScore();
-            String snakeId = snake.getName() + "_" + snake.getColor();
-            
-            // Check for score milestone (100, 500, 1000)
-            Long lastMilestoneCheck = milestones.getOrDefault(snakeId, 0L);
-            for (int milestone : new int[]{100, 500, 1000}) {
-                if (score >= milestone && lastMilestoneCheck < milestone) {
-                    state.setBoostCoins(state.getBoostCoins() + 50);
-                    milestones.put(snakeId, (long) milestone);
-                }
-            }
+            applyScoreMilestoneCoins(state, milestones, snake);
         }
         lastScoreMilestoneCheck.put(roomCode, milestones);
         
         // Hybrid boost (slither.io rule): holding boost runs 2x speed but sheds
         // tail segments as food. Cannot boost below BOOST_MIN_LENGTH segments.
         for (Snake snake : snakes) {
-            if (!snake.isAlive()) {
-                snake.setBoosting(false);
-                snake.setSpeedMultiplier(1.0f);
-                continue;
-            }
-            if (snake.isBoosting()) {
-                if (snake.getSegments().size() <= BOOST_MIN_LENGTH) {
-                    snake.setBoosting(false);
-                    snake.setSpeedMultiplier(1.0f);
-                    continue;
-                }
-                snake.setSpeedMultiplier(BOOST_SPEED_MULTIPLIER);
-                if (state.getTick() % BOOST_SHED_INTERVAL_TICKS == 0) {
-                    List<Point> segs = snake.getSegments();
-                    Point tail = segs.get(segs.size() - 1);
-                    segs.remove(segs.size() - 1);
-                    if (foods.size() < MAX_FOODS) {
-                        foods.add(new Food(tail.getX(), tail.getY(), "NORMAL"));
-                    }
-                }
-            } else {
-                snake.setSpeedMultiplier(1.0f);
-            }
+            applyHybridBoost(snake, state, foods);
         }
 
         // Kill rewards come from the dead snake's body becoming orbs (food) -
@@ -396,8 +371,31 @@ public class GameEngine {
         }
     }
 
+    /**
+     * Applies gated body growth after a snake's head has moved onto a food cell.
+     *
+     * <p>Adds the food value to the score, then decides growth using a gate that
+     * depends on the NEW score: below/at 100 points every food grows one segment
+     * (threshold 1); past 100 points growth is gated to every 4th accumulated
+     * point (threshold 4). Pending points that don't reach the threshold carry
+     * over via {@code growthPoints}.</p>
+     *
+     * <p>Growth means keeping the tail (the caller already advanced the head);
+     * no growth means removing the tail, net zero segment change.</p>
+     */
     public static void applyGatedGrowth(Snake snake, int foodValue) {
-
+        snake.setScore(snake.getScore() + foodValue);
+        int threshold = snake.getScore() > GATE_GROWTH_SCORE ? 4 : 1;
+        int accumulated = snake.getGrowthPoints() + foodValue;
+        if (accumulated >= threshold) {
+            accumulated -= threshold;
+        } else {
+            List<Point> segments = snake.getSegments();
+            if (segments.size() > 1) {
+                segments.remove(segments.size() - 1);
+            }
+        }
+        snake.setGrowthPoints(accumulated % threshold);
     }
 
     /**
@@ -486,6 +484,79 @@ public class GameEngine {
         }
 
         return collisionDeaths;
+    }
+
+    /**
+     * Time-based boost coin reward: +10 coins once every 5 seconds of gameplay.
+     * Returns the reward amount (10) when both the 5s-since-start and 5s-since-last-reward
+     * conditions hold, otherwise 0. The caller is responsible for updating the last-reward
+     * timestamp when a reward is granted.
+     */
+    static int timedBoostCoinReward(long now, long gameStartTime, long lastRewardTime) {
+        if (now - gameStartTime >= BOOST_COIN_INTERVAL_MS && now - lastRewardTime >= BOOST_COIN_INTERVAL_MS) {
+            return BOOST_COIN_TIME_REWARD;
+        }
+        return 0;
+    }
+
+    /**
+     * Score-milestone boost coin reward: +50 coins the first time a snake's score reaches
+     * each milestone (100, 500, 1000). Per-snake tracking uses the {@code name_color} key;
+     * the {@code milestones} map is updated in place, so calling this repeatedly for an
+     * unchanged score awards nothing. If a snake jumps past several milestones at once,
+     * all crossed milestones are awarded in a single call (existing behavior).
+     *
+     * @return total coins awarded by this call
+     */
+    static int applyScoreMilestoneCoins(GameState state, Map<String, Long> milestones, Snake snake) {
+        int awarded = 0;
+        int score = snake.getScore();
+        String snakeId = snake.getName() + "_" + snake.getColor();
+        Long lastMilestoneCheck = milestones.getOrDefault(snakeId, 0L);
+        for (int milestone : SCORE_MILESTONES) {
+            if (score >= milestone && lastMilestoneCheck < milestone) {
+                awarded += BOOST_COIN_MILESTONE_REWARD;
+                milestones.put(snakeId, (long) milestone);
+            }
+        }
+        state.setBoostCoins(state.getBoostCoins() + awarded);
+        return awarded;
+    }
+
+    /**
+     * Hybrid (slither.io-style) boost for one snake on one tick: while boosting the snake
+     * moves at BOOST_SPEED_MULTIPLIER and sheds one tail segment as NORMAL food every
+     * BOOST_SHED_INTERVAL_TICKS ticks. Boost auto-disables at or below BOOST_MIN_LENGTH
+     * segments. Dead snakes are force-unboosted with multiplier reset to 1.0.
+     *
+     * @return true if a tail segment was shed into {@code foods} this tick
+     */
+    static boolean applyHybridBoost(Snake snake, GameState state, List<Food> foods) {
+        if (!snake.isAlive()) {
+            snake.setBoosting(false);
+            snake.setSpeedMultiplier(1.0f);
+            return false;
+        }
+        if (snake.isBoosting()) {
+            if (snake.getSegments().size() <= BOOST_MIN_LENGTH) {
+                snake.setBoosting(false);
+                snake.setSpeedMultiplier(1.0f);
+                return false;
+            }
+            snake.setSpeedMultiplier(BOOST_SPEED_MULTIPLIER);
+            if (state.getTick() % BOOST_SHED_INTERVAL_TICKS == 0) {
+                List<Point> segs = snake.getSegments();
+                Point tail = segs.get(segs.size() - 1);
+                segs.remove(segs.size() - 1);
+                if (foods.size() < MAX_FOODS) {
+                    foods.add(new Food(tail.getX(), tail.getY(), "NORMAL"));
+                    return true;
+                }
+            }
+        } else {
+            snake.setSpeedMultiplier(1.0f);
+        }
+        return false;
     }
 }
 

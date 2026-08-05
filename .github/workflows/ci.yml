@@ -1,0 +1,36 @@
+# CI for the Multiplayer Snake Game.
+# No DB_PASSWORD needed here: `mvn test` is pure engine unit tests (no DB).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build & test
+        run: mvn -B clean test
+
+      # Tests already ran above — package without re-running them.
+      - name: Package WAR
+        run: mvn -B package -DskipTests
+
+      - name: Upload WAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Multiplayer_Snake_Game.war
+          path: target/Multiplayer_Snake_Game.war

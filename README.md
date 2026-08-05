@@ -1,6 +1,6 @@
 # Multiplayer Snake Game 🐍
 
-> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 3, 2026
+> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 5, 2026
 
 > A real-time multiplayer Snake game built with **Java 17**, **Jakarta EE 6**, **WebSocket**, and **PostgreSQL** — featuring room-based gameplay, JWT authentication, hybrid IO mechanics, and a responsive canvas UI.
 
@@ -28,18 +28,18 @@
 
 ### Persistent Stats & Progression
 - **PostgreSQL Backend** — Player stats: total games, total score, high score
-- **Power-ups** — Golden food (3× points, 5% speed boost chance), boost coins every 5s
-- **Boost System** — Spend 3 coins for 3× speed (3s), earn via milestones
+- **Power-ups** — Golden food (3× points), boost coins every 5s
+- **Boost System** — Hold SPACE/Shift (or boost button) for 2× speed with tail-shedding; boost coins from time (+10/5s) and milestones (+50 @ 100/500/1000)
 
 ### Advanced Gameplay
 - **Hybrid IO Rules** — Walk your own body allowed; head‑ons kill both snakes; other snakes' bodies are lethal
-- **Smart AI Bots** — Four unique personalities (balanced, aggressive, defensive, foodie, hunter) for testing and entertainment
+- **Smart AI Bots** — Server-side bots with flood-fill survival + opponent-aware hunting; PowerShell launchers for testing
 - **Cross-Platform** — Desktop, mobile, touch‑and‑gesture controls
 
 ### Developer-Friendly
 - **Jakarta EE 6** — Modern, standards‑based Java web development
 - **Comprehensive API** — Full REST/ WebSocket coverage
-- **Playwright Tests** — E2E automation with AI bot scenarios
+- **Scripted Bot Testing** — `bot.ps1` and `run_4bot_game.ps1` for quick AI play-testing
 
 ---
 
@@ -80,7 +80,7 @@
 | **Desktop** | ![PC Gameplay](media/pc/pc-gameplay.gif) |
 | **Mobile** | ![Mobile Gameplay](media/mobile/mobile-gameplay.gif) |
 
-> **Note:** GIFs show multiple rematch rounds in one session — round → game-over screen → ready-up → next round. Recorded with Playwright using survival-leaning bot personalities (balanced + 2 defensive + foodie). *Original MP4 videos also available in media/ folders.*
+> **Note:** GIFs show multiple rematch rounds in one session — round → game-over screen → ready-up → next round. *Original MP4 videos also available in media/ folders.*
 
 ---
 
@@ -91,12 +91,12 @@
 | **Language** | Java 17 |
 | **Web Framework** | Jakarta Servlet 6.0, Jakarta WebSocket 2.1 |
 | **Build** | Maven 3.9+ (WAR packaging) |
-| **Server** | Apache Tomcat 11 / Jetty 11 |
+| **Server** | Apache Tomcat 11 / Jetty 12 (dev) |
 | **Database** | PostgreSQL 14+ |
 | **JSON** | Gson 2.10 |
 | **Password Hashing** | jBCrypt 0.4 |
 | **Frontend** | Vanilla JS (ES6), Canvas API, CSS Grid/Flexbox |
-| **Testing** | Playwright (TypeScript), AI bots |
+| **Testing** | JUnit 5 (engine unit tests), PowerShell + server-side AI bots |
 
 ---
 
@@ -146,15 +146,31 @@ export JWT_SECRET=$(openssl rand -base64 32)  # 32+ chars for HS256
 # Compile & package
 mvn clean package
 
-# Option 1: Jetty dev server (port 8081)
+# Option 1: Jetty 12 dev server (port 8080)
 mvn jetty:run
 
-# Option 2: Deploy to Tomcat
+# Option 2: Deploy to Tomcat 11+
 cp target/Multiplayer_Snake_Game.war $CATALINA_HOME/webapps/
 $CATALINA_HOME/bin/startup.sh
 ```
 
-Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty).
+### Option 3: Docker (recommended)
+```bash
+# 1. Install Docker Desktop (needs WSL2 + virtualization enabled in BIOS)
+# 2. Configure secrets once
+copy .env.example .env        # then edit .env with real DB_PASSWORD + JWT_SECRET (32+ chars)
+# 3. Build & run the full stack (app + PostgreSQL)
+docker compose up --build     # → http://localhost:8080
+# Stop: docker compose down   # add -v to also wipe the database volume
+```
+
+Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
+
+### Share it live (ngrok)
+
+1. Make sure the stack is running locally (Option 3 Docker, or Jetty + local PostgreSQL)
+2. `ngrok http 8080` (first time: create a free account at ngrok.com, then `ngrok config add-authtoken <token>`)
+3. Share the printed `https://<subdomain>.ngrok-free.app` URL — gameplay, REST API and WebSocket all work through the tunnel (the client builds WebSocket URLs from window.location, so wss:// is automatic)
 
 ---
 
@@ -164,8 +180,8 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 2. **Lobby** — Enter name, pick snake color, create or join a room
 3. **Ready Up** — All players press **READY** (or SPACE) to start 3s countdown
 4. **Control** — Arrow keys / WASD / on-screen D-pad / swipe (mobile)
-5. **Eat & Grow** — Normal food = 1pt, Golden food = 3pts + 5% speed boost chance
-6. **Boost** — Spend 3 boost coins for 3× speed (3s), earn coins every 5s + score milestones
+5. **Eat & Grow** — Normal food = 1pt, Golden food = 3pts, score == length (mass)
+6. **Boost** — Hold SPACE/Shift (or boost button) for 2× speed; sheds tail segments as food; coins from time (+10/5s) and milestones (+50 @ 100/500/1000)
 7. **Survive** — Last snake standing wins!
 
 ---
@@ -209,16 +225,14 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 ## 🧪 Play-Testing with AI Bots
 
 ```powershell
-# Launch 4 sophisticated AI bots in a room (room code from create/join)
+# Launch 4 AI bots: creates a room, joins + readies all, runs the round
 .\run_4bot_game.ps1
+
+# Or join a single bot to an existing room
+.\bot.ps1 -room <ROOMCODE> [-player <name>] [-server <base-url>]
 ```
 
-**Available Bot Personalities:**
-- **Balanced** (0.4 aggression) — Strategic gameplay
-- **Aggressive** (0.8 aggression) — Head-hunting tactics
-- **Defensive** (0.2 aggression) — Survival-focused
-- **Foodie** (0.9 food priority) — Food-chasing expert
-- **Hunter** (0.9 aggression, 0.3 food) — Hybrid predator
+Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware hunting with per-difficulty personalities.
 
 ---
 
@@ -226,29 +240,37 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 
 ```
 .
-├── pom.xml
+├── pom.xml                    # Maven WAR build, Jetty 12 ee10 dev plugin (:8080)
+├── Dockerfile                 # Multi-stage build (Maven → Tomcat 11)
+├── docker-compose.yml         # App + PostgreSQL stack
+├── .dockerignore
+├── .env.example               # Template for DB_PASSWORD / JWT_SECRET
+├── .github/workflows/ci.yml   # CI: mvn clean test + package on push/PR
+├── README.md                  # This overview
+├── PKB.md                     # Project Knowledge Base (architecture, APIs, ops)
+├── bot.ps1                    # PowerShell AI bot launcher
+├── run_4bot_game.ps1          # 4-bot demo launcher
 ├── src/
 │   ├── main/
 │   │   ├── java/com/snake/game/
-│   │   │   ├── model/      # Snake, Room, GameState, Food, Point
-│   │   │   ├── engine/     # GameEngine, RoomManager
-│   │   │   ├── servlet/    # Auth, Room, Game, WebSocket
-│   │   │   ├── db/         # DatabaseManager
-│   │   │   └── util/       # JwtUtil
+│   │   │   ├── model/         # Snake, Room, GameState, Food, Point
+│   │   │   ├── engine/        # GameEngine, RoomManager
+│   │   │   ├── servlet/       # Auth, Room, Game, WebSocket
+│   │   │   ├── db/            # DatabaseManager
+│   │   │   └── util/          # JwtUtil, BotManager, AdvancedBotManager
 │   │   └── webapp/
-│   │       ├── index.jsp   # Auth + Lobby
-│   │       ├── game.jsp    # Canvas game
+│   │       ├── index.jsp      # Auth page
+│   │       ├── game.jsp       # Lobby + game canvas
 │   │       ├── css/style.css
-│   │       └── js/
-│   │           ├── game.js # Game logic, WS, rendering
-│   │           └── ajax.js # REST helpers
-│   └── test/
-├── media/                  # Screenshots & gameplay videos
-│   ├── pc/                 # Desktop captures (9 PNG + 1 MP4)
-│   └── mobile/             # Mobile captures (9 PNG + 1 MP4)
-├── tests/                  # Playwright E2E tests
-├── bot.ps1                 # AI bot for testing
-└── README.md
+│   │       ├── js/game.js     # Game logic, WS, rendering
+│   │       ├── js/ajax.js     # REST helpers
+│   │       ├── sounds/        # countdown.ogg, gameover.wav
+│   │       └── WEB-INF/web.xml
+│   └── test/java/com/snake/game/engine/   # GameEngineCollisionTest (4/4) + GameEngineGrowthTest (5/5)
+├── media/                     # Screenshots & gameplay videos
+│   ├── pc/                    # Desktop captures (9 PNG + GIF + MP4)
+│   └── mobile/                # Mobile captures (9 PNG + GIF + MP4)
+└── .idea/                     # IntelliJ config (partial)
 ```
 
 ---
@@ -283,6 +305,21 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 | **Duplicate `js/` folder** — Identical copy of `src/main/webapp/js/` at repo root | Root | Deleted duplicate folder |
 | **.gitignore cleanup** — Added ignores for `.smarttomcat/`, debug/playtest/verify screenshots, screenshot logs | `.gitignore` | Prevents IDE/temp files from being committed |
 
+### ✅ Fixed (2026-08-05)
+
+| Issue | File | Fix |
+|-------|------|-----|
+| **Jetty 11 ≠ declared APIs** — Jetty 11.0.20 implements Jakarta EE 9 (Servlet 5.0/WebSocket 2.0) but the app declares Servlet 6.0/WebSocket 2.1 (Jakarta EE 10); also `scanIntervalSeconds` was an unknown parameter (hot reload silently disabled) | `pom.xml` | Upgraded to `org.eclipse.jetty.ee10:jetty-ee10-maven-plugin:12.0.16` (matches Tomcat 11 EE level); fixed config to `scan` |
+| **Docs** — Added Project Knowledge Base, updated structure/port references | `PKB.md`, `README.md` | New `PKB.md`; README structure + Jetty 12 + port 8080 corrections |
+
+### ✅ Phase 0 & Phase 1 (2026-08-05)
+
+| Issue | Fix |
+|-------|-----|
+| Boost coins/milestones/hybrid-boost logic untested | Extracted `timedBoostCoinReward`, `applyScoreMilestoneCoins`, `applyHybridBoost` into testable methods; added `GameEngineBoostTest` (12/12); `mvn test` now 21/21 |
+| Stale boost docs (3×/5%/spend-coins design that no longer exists) | PKB.md rewritten to match the hybrid-boost design; README updated in this pass |
+| No deployment path | Dockerfile + docker-compose.yml + GitHub Actions CI + ngrok runbook added |
+
 ### 🔧 In Progress / Planned
 
 | Area | Description | Priority |
@@ -291,7 +328,6 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 | **Spectator mode** | Allow watching games without playing | Low |
 | **Leaderboard** | Global/historical leaderboards with pagination | Low |
 | **Custom room settings** | Grid size, tick rate, max players, food density | Low |
-| **Unit tests** | Increase Java unit test coverage (currently integration-focused) | Medium |
 | **Accessibility** | Improve keyboard navigation, screen reader support | Low |
 
 ---
@@ -304,27 +340,29 @@ Then open `http://localhost:8080/Multiplayer_Snake_Game/` (or `:8081` for Jetty)
 - [x] **Authentication** — JWT remember-me, bcrypt, guest play
 - [x] **Room System** — Create/join/list, 6-char codes, 4-player max
 - [x] **Game Engine** — 150ms tick, collision detection, food spawning, scoring
-- [x] **Boost System** — Coins, speed boost (3×, 3s), golden food (5% chance)
+- [x] **Boost System** — Hybrid boost (2×, tail-shedding), boost coins (+10/5s, +50 @ milestones)
 - [x] **Frontend** — Responsive lobby + canvas game, touch/mobile support
-- [x] **AI Bots** — 5 personalities, TypeScript, Playwright integration
+- [x] **AI Bots** — Server-side bots + PowerShell launchers for testing
 - [x] **Media Capture** — 18 screenshots (9 PC + 9 mobile) + 2 gameplay videos
 - [x] **Critical Bug Fixes** — Game-freeze NPE, initial food, video timing, bot personalities
 - [x] **Leaderboard timer fix** — Timer no longer stuck at 0:00 during gameplay
 - [x] **Code cleanup** — Removed unused bot classes, duplicate js/ folder, improved .gitignore
+- [x] **Jetty 12 upgrade** — Dev server matches Servlet 6.0/WebSocket 2.1; hot reload fixed
+- [x] **Project Knowledge Base** — `PKB.md` added; docs updated to current structure
+- [x] **Phase 0 — Test coverage** — Boost coins/milestones/hybrid-boost unit tests (GameEngineBoostTest 12/12; `mvn test` 21/21 green)
+- [x] **Phase 1 — Deployment scaffold** — Docker (multi-stage + compose), GitHub Actions CI, ngrok runbook
 
 ### 🎯 Next Milestones
 
 - [ ] **Production hardening** — Rate limiting, input validation, security headers
 - [ ] **Observability** — Structured logging, metrics, health endpoints
-- [ ] **Docker support** — Multi-stage Dockerfile for easy deployment
-- [ ] **CI/CD** — GitHub Actions for build, test, deploy
 - [ ] **Documentation** — OpenAPI/Swagger for REST endpoints
 
 ---
 
 ## 👨‍💻 Author
 
-**Alish Mainalee**  
+**Alish Mainalee**
 Built to explore Java backend development, Jakarta EE, WebSocket real-time communication, and full-stack integration with PostgreSQL.
 
 - GitHub: [@alish-3](https://github.com/alish-3)
@@ -341,11 +379,10 @@ MIT License — feel free to use, modify, and distribute.
 ## 🙏 Acknowledgments
 
 - Jakarta EE community for the modern Java web stack
-- Playwright team for excellent E2E testing framework
 - PostgreSQL for reliable persistence
 - All open-source libraries that made this project possible
 
 ---
 
-*Last updated: August 3, 2026*  
+*Last updated: August 5, 2026*
 *Status: Actively maintained — bugs are tracked, fixed, and verified. Committed to making this as bug-free as possible.*

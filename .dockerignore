@@ -1,0 +1,35 @@
+# Build output
+target/
+
+# Local env (never bake secrets into the image)
+.env
+
+# Test tooling
+node_modules/
+playwright-report/
+test-results/
+tests/
+scripts/
+src/bot.ts
+src/bot-controller.ts
+package.json
+package-lock.json
+tsconfig.json
+playwright.config.ts
+playwright.tickdebug.config.ts
+capture.config.ts
+
+# IDE / local
+.git/
+.idea/
+.smarttomcat/
+media/
+
+# Scripts & logs
+*.ps1
+*.log
+
+# Docs
+README.md
+PKB.md
+AGENTS.md

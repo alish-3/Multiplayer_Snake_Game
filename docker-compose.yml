@@ -1,0 +1,39 @@
+# Docker Compose stack for the Multiplayer Snake Game.
+# Usage: copy .env.example to .env (edit secrets) -> `docker compose up --build` -> http://localhost:8080
+# DB_PASSWORD and JWT_SECRET come from the .env file or your shell environment.
+# The JWT_SECRET default below is DEV-ONLY — always set a real 32+ char secret in production.
+# The db port is intentionally NOT published to the host to avoid conflicts with a local
+# PostgreSQL on 5432. To expose it anyway, add: ports: ["5432:5432"] to the db service.
+
+services:
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: snake_game
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-snake_dev_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d snake_game"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/snake_game
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD:-snake_dev_password}
+      JWT_SECRET: ${JWT_SECRET:-insecure-dev-jwt-secret-change-me-0123456789}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

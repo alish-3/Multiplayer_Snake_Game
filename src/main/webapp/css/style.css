@@ -1048,6 +1048,8 @@ body.game-page {
     inset: 0;
     z-index: 5;
     border-radius: 14px;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 html.swipe-mode .touch-swipe-area { display: block !important; }
@@ -1260,9 +1262,9 @@ html.swipe-mode .touch-dpad { display: none !important; }
     border: 2px solid var(--border);
     border-radius: 16px;
     cursor: pointer;
-    touch-action: manipulation;
+    touch-action: none;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    transition: all 0.15s;
+    transition: all 0.05s;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
 }
