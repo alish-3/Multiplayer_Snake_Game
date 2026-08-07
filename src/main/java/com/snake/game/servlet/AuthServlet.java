@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.snake.game.db.DatabaseManager;
 import com.snake.game.util.JwtUtil;
+import com.snake.game.util.RateLimiter;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -23,6 +24,10 @@ public class AuthServlet extends HttpServlet {
         resp.setContentType("application/json");
         resp.setCharacterEncoding("UTF-8");
 
+        // Get client IP for rate limiting
+        String clientIp = getClientIp(req);
+        String clientKey = "ip:" + clientIp;
+
         BufferedReader reader = req.getReader();
         JsonObject json = gson.fromJson(reader, JsonObject.class);
         if (json == null || !json.has("action") || json.get("action").isJsonNull()) {
@@ -30,6 +35,11 @@ public class AuthServlet extends HttpServlet {
             return;
         }
         String action = json.get("action").getAsString();
+
+        // Apply rate limiting based on action (per IP)
+        if (!checkRateLimit(req, resp, action, clientKey)) {
+            return; // Rate limited response already sent
+        }
 
         switch (action) {
             case "register":
@@ -50,6 +60,69 @@ public class AuthServlet extends HttpServlet {
             default:
                 resp.getWriter().write(gson.toJson(Map.of("success", false, "error", "Unknown action")));
         }
+    }
+
+    /**
+     * Checks rate limit for the given action and client key.
+     * Returns true if allowed, false if rate limited (response already sent).
+     */
+    private boolean checkRateLimit(HttpServletRequest req, HttpServletResponse resp, String action, String clientKey) throws IOException {
+        RateLimiter limiter = RateLimiter.getInstance();
+        boolean allowed;
+        long retryAfterMs;
+        String errorMessage;
+
+        switch (action) {
+            case "register":
+                // 3 requests per minute per IP
+                allowed = limiter.tryConsume(clientKey, 3, 60_000);
+                retryAfterMs = limiter.getRetryAfterMs(clientKey, 3, 60_000);
+                errorMessage = "Rate limit exceeded for register (max 3 per minute)";
+                break;
+            case "login":
+                // 5 requests per minute per IP
+                allowed = limiter.tryConsume(clientKey, 5, 60_000);
+                retryAfterMs = limiter.getRetryAfterMs(clientKey, 5, 60_000);
+                errorMessage = "Rate limit exceeded for login (max 5 per minute)";
+                break;
+            case "remember":
+                // 10 requests per minute per IP
+                allowed = limiter.tryConsume(clientKey, 10, 60_000);
+                retryAfterMs = limiter.getRetryAfterMs(clientKey, 10, 60_000);
+                errorMessage = "Rate limit exceeded for remember (max 10 per minute)";
+                break;
+            default:
+                return true; // No rate limiting for other actions
+        }
+
+        if (!allowed) {
+            resp.setStatus(429); // Too Many Requests
+            resp.setHeader("Retry-After", String.valueOf((retryAfterMs + 999) / 1000)); // Seconds, rounded up
+            resp.getWriter().write(gson.toJson(Map.of(
+                "success", false,
+                "error", errorMessage,
+                "retryAfterMs", retryAfterMs
+            )));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Extracts client IP from request, checking proxy headers first.
+     */
+    private String getClientIp(HttpServletRequest req) {
+        String ip = req.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isEmpty()) {
+            // X-Forwarded-For can contain multiple IPs, take the first one
+            ip = ip.split(",")[0].trim();
+        } else {
+            ip = req.getHeader("X-Real-IP");
+        }
+        if (ip == null || ip.isEmpty()) {
+            ip = req.getRemoteAddr();
+        }
+        return ip;
     }
 
     private String getString(JsonObject json, String key) {

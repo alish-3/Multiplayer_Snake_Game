@@ -2,6 +2,8 @@ package com.snake.game.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class Room {
@@ -17,6 +19,16 @@ public class Room {
     private String gameMode; // "friends" or "bots"
     private int botCount; // Number of bots to add (0-3)
     private String botDifficulty; // "easy", "normal", "hard", "impossible"
+    
+    // Custom room settings
+    private int gridSize; // default 30, range 15-50
+    private int tickRateMs; // default 150, range 50-500
+    private double foodDensity; // default 1.0, range 0.5-3.0
+    private boolean enableBoost; // default true
+    private boolean enableGoldenFood; // default true
+    
+    // Spectators
+    private final Set<String> spectators = ConcurrentHashMap.newKeySet();
 
     public Room() {
         this.code = generateCode();
@@ -28,6 +40,13 @@ public class Room {
         this.gameMode = "friends"; // default
         this.botCount = 0;
         this.botDifficulty = "normal"; // default
+        
+        // Custom room settings defaults
+        this.gridSize = 30;
+        this.tickRateMs = 150;
+        this.foodDensity = 1.0;
+        this.enableBoost = true;
+        this.enableGoldenFood = true;
     }
 
     public Room(String code) {
@@ -69,6 +88,18 @@ public class Room {
     public void setBotCount(int botCount) { this.botCount = botCount; }
     public String getBotDifficulty() { return botDifficulty; }
     public void setBotDifficulty(String botDifficulty) { this.botDifficulty = botDifficulty; }
+    
+    // Custom room settings getters/setters
+    public int getGridSize() { return gridSize; }
+    public void setGridSize(int gridSize) { this.gridSize = gridSize; }
+    public int getTickRateMs() { return tickRateMs; }
+    public void setTickRateMs(int tickRateMs) { this.tickRateMs = tickRateMs; }
+    public double getFoodDensity() { return foodDensity; }
+    public void setFoodDensity(double foodDensity) { this.foodDensity = foodDensity; }
+    public boolean isEnableBoost() { return enableBoost; }
+    public void setEnableBoost(boolean enableBoost) { this.enableBoost = enableBoost; }
+    public boolean isEnableGoldenFood() { return enableGoldenFood; }
+    public void setEnableGoldenFood(boolean enableGoldenFood) { this.enableGoldenFood = enableGoldenFood; }
 
     public int getPlayerCount() {
         return players.size();
@@ -108,5 +139,56 @@ public class Room {
             return (now - gameOverTimestamp) >= 10000; // 10 seconds in milliseconds
         }
         return false;
+    }
+
+    // ==================== Spectator Methods ====================
+
+    /**
+     * Returns the set of spectator names.
+     * Thread-safe: returns the concurrent set directly.
+     */
+    public Set<String> getSpectators() {
+        return spectators;
+    }
+
+    /**
+     * Adds a spectator to the room.
+     * @param name The spectator name
+     * @return true if the spectator was added (was not already present), false if already a spectator
+     */
+    public boolean addSpectator(String name) {
+        return spectators.add(name);
+    }
+
+    /**
+     * Removes a spectator from the room.
+     * @param name The spectator name
+     * @return true if the spectator was removed, false if not found
+     */
+    public boolean removeSpectator(String name) {
+        return spectators.remove(name);
+    }
+
+    /**
+     * Returns the number of spectators in the room.
+     */
+    public int getSpectatorCount() {
+        return spectators.size();
+    }
+
+    /**
+     * Checks if a name is currently a spectator in this room.
+     * @param name The name to check
+     * @return true if the name is a spectator
+     */
+    public boolean hasSpectator(String name) {
+        return spectators.contains(name);
+    }
+
+    /**
+     * Returns the total number of occupants (players + spectators).
+     */
+    public int getTotalOccupants() {
+        return players.size() + spectators.size();
     }
 }

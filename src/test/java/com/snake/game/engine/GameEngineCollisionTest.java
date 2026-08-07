@@ -71,7 +71,7 @@ class GameEngineCollisionTest {
         Map<Snake, List<Point>> paths = new HashMap<>();
         setup(snakes, nextHeads, paths);
 
-        var dead = resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>());
+        var dead = resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>(), "TEST", 0);
 
         assertTrue(leader.isAlive(), "leader must survive");
         assertTrue(chaser.isAlive(), "tail-following chaser must survive (tail vacates)");
@@ -96,7 +96,7 @@ class GameEngineCollisionTest {
         Map<Snake, List<Point>> paths = new HashMap<>();
         setup(snakes, nextHeads, paths);
 
-        resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>());
+        resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>(), "TEST", 0);
 
         assertFalse(leader.isAlive(), "leader steps into the chaser's current head cell - mutual head-on");
         assertFalse(chaser.isAlive(), "chaser must NOT ride into the leader's current head cell");
@@ -118,7 +118,7 @@ class GameEngineCollisionTest {
         Map<Snake, List<Point>> paths = new HashMap<>();
         setup(snakes, nextHeads, paths);
 
-        resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>());
+        resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>(), "TEST", 0);
 
         assertTrue(leader.isAlive(), "leader survives");
         assertFalse(chaser.isAlive(), "chaser must not ride into a growing snake's retained tail");
@@ -138,7 +138,7 @@ class GameEngineCollisionTest {
         Map<Snake, List<Point>> paths = new HashMap<>();
         setup(snakes, nextHeads, paths);
 
-        resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>());
+        resolveHeadBodyCollisions(snakes, nextHeads, paths, new ArrayList<>(), "TEST", 0);
 
         assertFalse(leader.isAlive(), "head-on swap kills the leader");
         assertFalse(chaser.isAlive(), "head-on swap kills the chaser");

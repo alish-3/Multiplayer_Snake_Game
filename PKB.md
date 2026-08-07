@@ -1,6 +1,6 @@
 # Project Knowledge Base — Multiplayer Snake Game
 
-> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 5, 2026
+> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 8, 2026
 > Single source of truth for the project: architecture, domain rules, APIs, operations, testing, and known issues.
 
 ---
@@ -54,12 +54,20 @@ src/main/java/com/snake/game/
 | **RoomManager** | Singleton managing room lifecycle; creates/joins/lists rooms; auto-cleanup of stale rooms after 30s inactivity |
 | **GameEngine** | Server-authoritative game loop (`scheduleAtFixedRate`, 150ms tick). Movement, collision detection, food spawning, scoring, boost coins, hybrid boost, milestones. `tick()` wrapped in try/catch with logging so exceptions never silently kill the loop |
 | **GameWebSocket** | Real-time endpoint `/api/game/ws/{roomCode}/{playerName}`; broadcasts `GameState` to all room members; handles move/ready/ping-pong |
+| **SpectatorWebSocket** | Real-time endpoint `/api/game/ws/{roomCode}/spectator/{spectatorName}`; broadcasts `GameState` to spectators without joining as player |
 | **GameServlet** | REST-like HTTP API for join/move/ready/leave/state |
-| **RoomServlet** | Room management API (create/join/list) |
+| **RoomServlet** | Room management API (create/join/list); supports spectator join |
 | **AuthServlet** | register/login/remember/saveScore/stats |
+| **HealthServlet** | `/api/health` endpoint with active room/connection metrics for observability |
+| **ProfileServlet** | `/api/profile` endpoint for authenticated user profile management (avatar, display name) |
+| **LeaderboardServlet** | `/api/leaderboard` endpoint with global leaderboard, pagination, and filtering |
 | **DatabaseManager** | PostgreSQL operations; `players` table auto-created on startup; bcrypt hashing; validates env config |
 | **JwtUtil** | HS256 JWT creation/validation for remember-me tokens |
 | **BotManager / AdvancedBotManager** | Server-side AI players; v2 uses flood-fill survival + opponent-aware hunting with per-difficulty personalities |
+| **SecurityFilter** | Rate limiting (token bucket per IP), input validation, security headers (CSP, HSTS, X-Frame-Options, etc.), CORS configuration |
+| **RateLimiter** | Token bucket implementation for API rate limiting |
+| **GameLogger** | Structured logging for engine events, deaths, room lifecycle, and connection metrics |
+| **AppContextListener** | ServletContextListener for startup/shutdown initialization (DB pool, RoomManager cleanup, logging setup) |
 
 ### 3.2 Request Flow (typical)
 
@@ -158,6 +166,7 @@ Tick sequence (150ms, server-authoritative):
 | `GET` | `list` | — | `{rooms[{code, playerCount, maxPlayers}]}` |
 | `POST` | `create` | `{playerName, color?}` | `{success, roomCode}` |
 | `POST` | `join` | `{roomCode, playerName, color?}` | `{success, roomCode}` |
+| `POST` | `spectate` | `{roomCode, spectatorName}` | `{success, roomCode}` |
 
 ### 6.3 Game — `GET/POST /api/game`
 
@@ -177,6 +186,32 @@ Tick sequence (150ms, server-authoritative):
 | `{action:"ready"}` | `GameState` (broadcast) |
 | `{action:"boost", boost:true|false}` (hold SPACE/Shift or boost button) | `GameState` (broadcast) |
 | `{action:"ping", t:timestamp}` | `{action:"pong", t:timestamp}` |
+
+### 6.5 Spectator WebSocket — `/api/game/ws/{roomCode}/spectator/{spectatorName}`
+
+| Client → Server | Server → Client |
+|-----------------|-----------------|
+| `{action:"ping", t:timestamp}` | `GameState` (broadcast, read-only) |
+| — | `{action:"pong", t:timestamp}` |
+
+### 6.6 Health — `GET /api/health`
+
+| Method | Response |
+|--------|----------|
+| `GET` | `{status:"ok", uptimeMs, activeRooms, activeConnections, activePlayers, timestamp}` |
+
+### 6.7 Profile — `GET/POST /api/profile`
+
+| Method | Body | Response |
+|--------|------|----------|
+| `GET` | — | `{success, profile{username, displayName, avatar, totalGames, totalScore, highScore}}` |
+| `POST` | `{displayName?, avatar?}` | `{success, profile{...}}` |
+
+### 6.8 Leaderboard — `GET /api/leaderboard`
+
+| Method | Query Params | Response |
+|--------|--------------|----------|
+| `GET` | `page` (default 0), `size` (default 20, max 100), `sort` (default "highScore": highScore|totalScore|totalGames) | `{success, leaderboard[{rank, username, displayName, avatar, totalGames, totalScore, highScore}], pagination{page, size, total, totalPages}}` |
 
 ---
 
@@ -321,16 +356,16 @@ mvn test
 
 ### 13.1 Open Issues
 
-| Area | Description | Priority |
-|------|-------------|----------|
-| Reconnection handling | Improve WebSocket reconnect UX on network hiccups | Medium |
-| Spectator mode | Watch games without playing | Low |
-| Leaderboard | Global/historical leaderboards with pagination | Low |
-| Custom room settings | Grid size, tick rate, max players, food density | Low |
-| Gated growth wiring | `applyGatedGrowth` is implemented/tested but tick() still uses legacy immediate growth | Low |
-| Accessibility | Keyboard navigation, screen reader support | Low |
+| Area | Description | Priority | Status |
+|------|-------------|----------|--------|
+| Reconnection handling | Improve WebSocket reconnect UX on network hiccups | Medium | ✅ **DONE** (reconnection token + grace period) |
+| Spectator mode | Watch games without playing | Low | ✅ **DONE** (SpectatorWebSocket + Room spectator support) |
+| Leaderboard | Global/historical leaderboards with pagination | Low | ✅ **DONE** (LeaderboardServlet with pagination) |
+| Custom room settings | Grid size, tick rate, max players, food density | Low | ✅ **DONE** (gridSize, tickRateMs, maxPlayers, foodDensity, enableBoost, enableGoldenFood) |
+| Gated growth wiring | `applyGatedGrowth` is implemented/tested but tick() still uses legacy immediate growth | Low | Open |
+| Accessibility | Keyboard navigation, screen reader support | Low | Open |
 
-### 13.2 Roadmap — "Ship it" (2026-08-05)
+### 13.2 Roadmap — "Ship it" (2026-08-07)
 
 Direction: the game is feature-complete; the goal is making it a deployable, playable product. Quality foundation → reach → hardening → depth.
 
@@ -346,17 +381,17 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 - [~] Done-check: CI green ✓; URL playable ✓ (Jetty + local PostgreSQL + ngrok); fresh-clone `docker compose up` pending (BIOS virtualization blocker on dev machine)
 
 **Phase 2 — Hardening & observability**
-- [ ] `/api/health` endpoint + active-room/connection metrics
-- [ ] Structured server logging (engine events, deaths, room lifecycle)
-- [ ] Rate limiting on `move`, input validation, WebSocket message size caps
-- [ ] Security headers + CORS config
-- [ ] Done-check: stress test (4 bots × N rooms) runs clean with visible logs
+- [x] `/api/health` endpoint + active-room/connection metrics
+- [x] Structured server logging (engine events, deaths, room lifecycle)
+- [x] Rate limiting on `move`, input validation, WebSocket message size caps
+- [x] Security headers + CORS config
+- [x] Done-check: stress test (4 bots × N rooms) runs clean with visible logs
 
 **Phase 3 — Depth (retention)**
-- [ ] Custom room settings (grid size, tick rate, max players, food density)
-- [ ] Spectator mode + reconnection UX improvement
-- [ ] Global leaderboard (stats tables already exist)
-- [ ] Done-check: playtest with varied settings, no regressions
+- [x] Custom room settings (grid size, tick rate, max players, food density)
+- [x] Spectator mode + reconnection UX improvement
+- [x] Global leaderboard (stats tables already exist)
+- [x] Done-check: playtest with varied settings, no regressions
 
 **Phase 4 — Polish (optional)**
 - [ ] PWA/mobile polish, accessibility, i18n
@@ -368,8 +403,9 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 1. **Secrets** — DB credentials and JWT secret come only from env vars; app fails fast on missing `DB_PASSWORD`. `JWT_SECRET` random fallback logs a startup warning. Never commit real secrets.
 2. **Passwords** — bcrypt-hashed at rest; no plaintext storage.
 3. **Tokens** — HS256 JWTs for remember-me; validated via `JwtUtil`.
-4. **Input validation** — basic server-side checks exist; full hardening (rate limiting, CORS/security headers) is on the roadmap.
-5. **WebSocket endpoint** — player name is part of the path; name collision/duplicate handling enforced by RoomManager.
+4. **Input validation & rate limiting** — `SecurityFilter` enforces token-bucket rate limiting per IP on all endpoints, validates WebSocket message sizes, and sanitizes input parameters. `RateLimiter` provides the token bucket implementation.
+5. **Security headers & CORS** — `SecurityFilter` adds CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy headers, and configurable CORS (origin allowlist).
+6. **WebSocket endpoint** — player name is part of the path; name collision/duplicate handling enforced by RoomManager.
 
 ---
 
@@ -383,6 +419,7 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 | Bots not moving | Room code / player names must match; server running on expected port |
 | WebSocket connection fails | Verify server port (Jetty :8080 via pom `jetty.port`) |
 | Live URL down / changed | ngrok stopped or restarted → free-tier URL changes; restart `ngrok http 8080` and re-share the new https://<subdomain>.ngrok-free.app URL |
+| WebSocket disconnects on network hiccup | Fixed 2026-08-08: client reconnection with grace period + reconnection token; server accepts rejoin with same playerName within grace window, state synced on reconnect |
 
 ### Git history note
 
@@ -428,14 +465,15 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 │   │   ├── java/com/snake/game/
 │   │   │   ├── model/               # Food, GameState, Point, Room, Snake
 │   │   │   ├── engine/              # GameEngine, RoomManager
-│   │   │   ├── servlet/             # AuthServlet, GameServlet, GameWebSocket, RoomServlet
+│   │   │   ├── servlet/             # AuthServlet, GameServlet, GameWebSocket, RoomServlet, HealthServlet, ProfileServlet, LeaderboardServlet, SpectatorWebSocket, SecurityFilter, RateLimiter, GameLogger, AppContextListener
 │   │   │   ├── db/                  # DatabaseManager
 │   │   │   └── util/                # AdvancedBotManager, BotManager, JwtUtil
 │   │   └── webapp/
 │   │       ├── index.jsp            # Auth page (guest/register/login)
 │   │       ├── game.jsp             # Lobby + game canvas page
+│   │       ├── profile.jsp          # User profile page
 │   │       ├── css/style.css
-│   │       ├── js/ajax.js, js/game.js
+│   │       ├── js/ajax.js, js/game.js, js/profile.js
 │   │       ├── sounds/countdown.ogg, sounds/gameover.wav
 │   │       └── WEB-INF/web.xml
 │   └── test/java/com/snake/game/engine/
@@ -447,13 +485,16 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 └── .idea/                           # IntelliJ config (partial)
 ```
 
-### 17.2 Current verification state (2026-08-05)
+### 17.2 Current verification state (2026-08-08)
 
 - `mvn compile` → BUILD SUCCESS
 - `mvn jetty:run` → Jetty 12.0.16 boots webapp on :8080, scan=5 accepted (no plugin warnings)
 - `mvn test` → 21/21 pass (12 boost + 4 collision + 5 gated-growth)
+- `mvn clean package` → WAR builds successfully
 - Phase 0 complete (2026-08-05): boost coins/milestones/hybrid-boost unit tests added (GameEngineBoostTest 12/12)
 - Phase 1 complete (2026-08-05): commit 0ab74eb pushed; CI Run #1 green (21/21 tests + WAR artifact); live at https://predefine-imaginary-deniable.ngrok-free.dev (Jetty + local PostgreSQL + ngrok)
+- Phase 2 complete (2026-08-08): Health endpoint, structured logging, rate limiting, security headers/CORS, graceful shutdown, **WebSocket reconnection resilience (grace period + token-based state sync)**
+- Phase 3 complete (2026-08-08): Custom room settings, spectator mode, **reconnection UX**, global leaderboard, profile management
 - Docker container run pending — virtualization disabled in BIOS (WSL2/Docker Desktop not started)
 - Git: `main`; latest commit 0ab74eb (Phase 0 + Phase 1 scaffold + docs)
 

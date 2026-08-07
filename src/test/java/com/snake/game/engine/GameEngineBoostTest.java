@@ -173,14 +173,14 @@ class GameEngineBoostTest {
         GameState state = newStateWithTick(2); // even tick -> shed
         List<Food> foods = new ArrayList<>();
 
-        assertTrue(applyHybridBoost(snake, state, foods), "shedding occurs on an even tick");
+        assertTrue(applyHybridBoost(snake, state, foods, "TEST"), "shedding occurs on an even tick");
         assertEquals(2.0f, snake.getSpeedMultiplier(), 0.0f, "boosting snake runs at 2x speed");
         assertEquals(7, snake.getSegments().size(), "one tail segment shed");
         assertEquals(1, foods.size(), "shed segment becomes food");
         assertEquals("NORMAL", foods.get(0).getType(), "shed food is NORMAL type");
 
         state.setTick(3); // odd tick -> no shed
-        assertFalse(applyHybridBoost(snake, state, foods), "no shedding on an odd tick");
+        assertFalse(applyHybridBoost(snake, state, foods, "TEST"), "no shedding on an odd tick");
         assertEquals(7, snake.getSegments().size(), "length unchanged on an odd tick");
         assertEquals(1, foods.size(), "no new food on an odd tick");
     }
@@ -191,7 +191,7 @@ class GameEngineBoostTest {
         snake.setBoosting(true);
         GameState state = newStateWithTick(2);
 
-        assertFalse(applyHybridBoost(snake, state, new ArrayList<>()),
+        assertFalse(applyHybridBoost(snake, state, new ArrayList<>(), "TEST"),
                 "boost must turn off at minimum length");
         assertFalse(snake.isBoosting(), "boosting flag cleared");
         assertEquals(1.0f, snake.getSpeedMultiplier(), 0.0f, "multiplier reset to 1.0");
@@ -206,7 +206,7 @@ class GameEngineBoostTest {
         snake.setAlive(false);
         GameState state = newStateWithTick(2);
 
-        assertFalse(applyHybridBoost(snake, state, new ArrayList<>()),
+        assertFalse(applyHybridBoost(snake, state, new ArrayList<>(), "TEST"),
                 "dead snake sheds nothing");
         assertFalse(snake.isBoosting(), "dead snake force-unboosted");
         assertEquals(1.0f, snake.getSpeedMultiplier(), 0.0f, "dead snake multiplier reset to 1.0");
@@ -219,7 +219,7 @@ class GameEngineBoostTest {
         snake.setSpeedMultiplier(2.0f); // stale multiplier from a previous boost
         GameState state = newStateWithTick(2);
 
-        applyHybridBoost(snake, state, new ArrayList<>());
+        applyHybridBoost(snake, state, new ArrayList<>(), "TEST");
 
         assertEquals(1.0f, snake.getSpeedMultiplier(), 0.0f,
                 "a non-boosting snake's multiplier must be reset to 1.0");
@@ -234,7 +234,7 @@ class GameEngineBoostTest {
         GameState state = newStateWithTick(2);
         List<Food> foods = fullFoodList(); // exactly MAX_FOODS
 
-        assertFalse(applyHybridBoost(snake, state, foods),
+        assertFalse(applyHybridBoost(snake, state, foods, "TEST"),
                 "no food is added once the food cap is reached");
         assertEquals(2.0f, snake.getSpeedMultiplier(), 0.0f, "boosting speed is unaffected by the cap");
         assertEquals(7, snake.getSegments().size(),

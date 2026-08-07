@@ -67,6 +67,7 @@
     var reconnectAttempts = 0;
     var MAX_RECONNECT = 20;
     var foodPulse = 0;
+    var reconnectToken = null;
 
     var particles = [];
     var audioCtx = null;
@@ -127,7 +128,11 @@
 
     function getWsUrl() {
         var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return proto + '//' + window.location.host + getBasePath() + '/api/game/ws/' + encodeURIComponent(roomCode) + '/' + encodeURIComponent(playerName);
+        var url = proto + '//' + window.location.host + getBasePath() + '/api/game/ws/' + encodeURIComponent(roomCode) + '/' + encodeURIComponent(playerName);
+        if (reconnectToken) {
+            url += '?reconnectToken=' + encodeURIComponent(reconnectToken);
+        }
+        return url;
     }
 
     // ---------- settings + UI wiring (BUG 4) ----------
@@ -790,6 +795,11 @@
         }
         if (typeof data.tick === 'number') lastServerTick = data.tick;
 
+        // Store reconnectToken if provided by server
+        if (data.reconnectToken) {
+            reconnectToken = data.reconnectToken;
+        }
+
         if (interpStart > 0) {
             interpDuration = Math.min(now - interpStart, 200);
         }
@@ -877,6 +887,7 @@
             gameOver = true;
             gameStarted = false;
             isReady = false;
+            reconnectToken = null; // Clear reconnect token on game over
             if (!isGuest && !scoreSaved) {
                 var my = findMySnake(data.snakes);
                 if (my) saveScore(my.score || 0);

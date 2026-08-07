@@ -2,13 +2,15 @@ package com.snake.game.engine;
 
 import com.snake.game.model.*;
 import com.snake.game.servlet.GameWebSocket;
+import com.snake.game.servlet.SpectatorWebSocket;
 import com.snake.game.util.AdvancedBotManager;
+import com.snake.game.util.GameLogger;
 import java.util.*;
 import java.util.concurrent.*;
 
 public class GameEngine {
-    private static final int GRID_SIZE = 30;
-    private static final int TICK_INTERVAL_MS = 150;
+    private static final int DEFAULT_GRID_SIZE = 30;
+    private static final int DEFAULT_TICK_INTERVAL_MS = 150;
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
     private static final Map<String, ScheduledFuture<?>> activeGames = new ConcurrentHashMap<>();
     private static final Map<String, Long> gameStartTimes = new ConcurrentHashMap<>();
@@ -45,16 +47,28 @@ public class GameEngine {
             gameStartTimes.put(room.getCode(), System.currentTimeMillis());
         }
 
-        ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> tick(room), 50, TICK_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        // Log game start
+        String[] playerNames = room.getPlayers().stream().map(Snake::getName).toArray(String[]::new);
+        GameLogger.gameStarted(room.getCode(), room.getPlayers().size(), playerNames);
+
+        int tickRateMs = room.getTickRateMs() > 0 ? room.getTickRateMs() : DEFAULT_TICK_INTERVAL_MS;
+        ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> tick(room), 50, tickRateMs, TimeUnit.MILLISECONDS);
         activeGames.put(room.getCode(), future);
     }
 
     public static void initGameState(Room room) {
+        int gridSize = room.getGridSize() > 0 ? room.getGridSize() : DEFAULT_GRID_SIZE;
+        double foodDensity = room.getFoodDensity() > 0 ? room.getFoodDensity() : 1.0;
+        
         List<Food> foods = new ArrayList<>();
-        for (int i = 0; i < 4; i++) {
-            foods.add(spawnFood(room));
+        int initialFoodCount = (int) Math.max(1, Math.round(4 * foodDensity));
+        for (int i = 0; i < initialFoodCount; i++) {
+            Food food = spawnFood(room);
+            foods.add(food);
+            // Log initial food spawn
+            GameLogger.foodSpawned(room.getCode(), food.getType(), food.getX(), food.getY(), food.getValue(), "initial");
         }
-        GameState state = new GameState(room.getPlayers(), foods, GRID_SIZE, false, false, 0);
+        GameState state = new GameState(room.getPlayers(), foods, gridSize, false, false, 0);
         state.setBoostCoins(20); // Initial boost coins
         state.setSnakeSpeedBoost(false);
         state.setSpeedBoostExpireTime(0);
@@ -66,6 +80,10 @@ public class GameEngine {
         GameState state = room.getGameState();
         if (state == null || state.isGameOver()) return;
 
+        int gridSize = room.getGridSize() > 0 ? room.getGridSize() : DEFAULT_GRID_SIZE;
+        boolean enableBoost = room.isEnableBoost();
+        boolean enableGoldenFood = room.isEnableGoldenFood();
+        
         state.setTick(state.getTick() + 1);
 
         // Countdown phase (real-time based)
@@ -76,10 +94,10 @@ public class GameEngine {
             if (remaining <= 0) {
                 state.setCountdown(0);
                 state.setGameStarted(true);
-                GameWebSocket.broadcastState(room.getCode(), state);
+                SpectatorWebSocket.broadcastToAll(room.getCode(), state);
             } else {
                 state.setCountdown(remaining);
-                GameWebSocket.broadcastState(room.getCode(), state);
+                SpectatorWebSocket.broadcastToAll(room.getCode(), state);
                 return;
             }
         }
@@ -128,9 +146,11 @@ public class GameEngine {
             Snake snake = entry.getKey();
             if (!snake.isAlive()) continue;
             for (Point cell : entry.getValue()) {
-                if (cell.getX() < 0 || cell.getX() >= GRID_SIZE || cell.getY() < 0 || cell.getY() >= GRID_SIZE) {
+                if (cell.getX() < 0 || cell.getX() >= gridSize || cell.getY() < 0 || cell.getY() >= gridSize) {
                     snake.setAlive(false);
                     wallDeaths.add(snake);
+                    // Log wall collision
+                    GameLogger.collisionWall(room.getCode(), snake.getName(), state.getTick(), cell.getX(), cell.getY());
                     break;
                 }
             }
@@ -140,12 +160,27 @@ public class GameEngine {
         List<Food> foods = new ArrayList<>(state.getFoods() != null ? state.getFoods() : new ArrayList<>());
 
         // Resolve head-ons and head-body hits against the post-move bodies.
-        Set<Snake> collisionDeaths = resolveHeadBodyCollisions(snakes, nextHeads, paths, foods);
+        Set<Snake> collisionDeaths = resolveHeadBodyCollisions(snakes, nextHeads, paths, foods, room.getCode(), state.getTick());
+
+        // Log all player deaths (wall + collisions)
+        for (Snake deadSnake : wallDeaths) {
+            GameLogger.playerDied(room.getCode(), deadSnake.getName(), "wall", state.getTick(), deadSnake.getScore(), deadSnake.getSegments().size());
+        }
+        for (Snake deadSnake : collisionDeaths) {
+            // Determine cause: head-on or head-body (both marked as collisionDeaths)
+            // We'll use a generic "collision" cause since both are handled in resolveHeadBodyCollisions
+            GameLogger.playerDied(room.getCode(), deadSnake.getName(), "collision", state.getTick(), deadSnake.getScore(), deadSnake.getSegments().size());
+        }
 
         // Spawn food from collision deaths (body segments become GOLDEN food, value 3)
-        for (Snake deadSnake : collisionDeaths) {
-            for (Point segment : deadSnake.getSegments()) {
-                foods.add(new Food(segment.getX(), segment.getY(), "GOLDEN"));
+        if (enableGoldenFood) {
+            // Spawn food from collision deaths (body segments become GOLDEN food, value 3)
+            for (Snake deadSnake : collisionDeaths) {
+                for (Point segment : deadSnake.getSegments()) {
+                    foods.add(new Food(segment.getX(), segment.getY(), "GOLDEN"));
+                    // Log golden food spawned from death
+                    GameLogger.foodSpawned(room.getCode(), "GOLDEN", segment.getX(), segment.getY(), 3, "collisionDeath");
+                }
             }
         }
 
@@ -168,6 +203,9 @@ public class GameEngine {
                 foods.remove(eatenFood);
                 // Hybrid rule: food value = length gained (score == length)
                 snake.setGrowthPoints(snake.getGrowthPoints() + eatenFood.getValue());
+                // Log food consumption
+                GameLogger.foodConsumed(room.getCode(), snake.getName(), eatenFood.getType(), eatenFood.getValue(), 
+                    eatenFood.getX(), eatenFood.getY(), snake.getSegments().size());
             }
 
             if (snake.getGrowthPoints() > 0) {
@@ -193,7 +231,13 @@ public class GameEngine {
 
         // Respawn food if none left
         if (foods.isEmpty()) {
-            foods.add(spawnFood(room));
+            double foodDensity = room.getFoodDensity() > 0 ? room.getFoodDensity() : 1.0;
+            int respawnCount = Math.max(1, (int) Math.round(foodDensity));
+            for (int i = 0; i < respawnCount; i++) {
+                Food food = spawnFood(room);
+                foods.add(food);
+                GameLogger.foodSpawned(room.getCode(), food.getType(), food.getX(), food.getY(), food.getValue(), "respawn");
+            }
         }
 
         // Handle score milestones for boost coin rewards
@@ -211,14 +255,36 @@ public class GameEngine {
         Map<String, Long> milestones = lastScoreMilestoneCheck.getOrDefault(roomCode, new HashMap<String, Long>());
 
         for (Snake snake : snakes) {
+            int coinsBefore = state.getBoostCoins();
             applyScoreMilestoneCoins(state, milestones, snake);
+            int coinsAfter = state.getBoostCoins();
+            int coinsAwarded = coinsAfter - coinsBefore;
+            if (coinsAwarded > 0) {
+                // Find which milestone was reached
+                int score = snake.getScore();
+                for (int milestone : SCORE_MILESTONES) {
+                    if (score >= milestone) {
+                        GameLogger.scoreMilestoneReached(room.getCode(), snake.getName(), milestone, coinsAwarded, coinsAfter);
+                        break;
+                    }
+                }
+            }
         }
         lastScoreMilestoneCheck.put(roomCode, milestones);
         
         // Hybrid boost (slither.io rule): holding boost runs 2x speed but sheds
         // tail segments as food. Cannot boost below BOOST_MIN_LENGTH segments.
-        for (Snake snake : snakes) {
-            applyHybridBoost(snake, state, foods);
+        if (enableBoost) {
+            for (Snake snake : snakes) {
+                boolean wasBoosting = snake.isBoosting();
+                applyHybridBoost(snake, state, foods, room.getCode());
+            }
+        } else {
+            // Disable boosting for all snakes if boost is disabled
+            for (Snake snake : snakes) {
+                snake.setBoosting(false);
+                snake.setSpeedMultiplier(1.0f);
+            }
         }
 
         // Kill rewards come from the dead snake's body becoming orbs (food) -
@@ -252,6 +318,17 @@ public class GameEngine {
         if ((multiplayer && aliveCount <= 1) || (!multiplayer && aliveCount == 0)) {
             state.setRoundDurationMs(elapsedMs);
             logGameOverSnapshot(room, state, elapsedMs, aliveCount);
+            
+            // Determine winner and log game end
+            String winnerName = null;
+            if (aliveCount == 1) {
+                winnerName = aliveSnakes.get(0).getName();
+            }
+            String[] finalScores = snakes.stream()
+                .map(s -> s.getName() + ":" + s.getScore() + (s.isAlive() ? "" : "(dead)"))
+                .toArray(String[]::new);
+            GameLogger.gameEnded(room.getCode(), winnerName, elapsedMs, state.getTick(), finalScores);
+            
             state.setGameOver(true);
             room.setGameInProgress(false);
             System.out.println("[GameEngine] GAME OVER code=" + room.getCode() + " gameInProgress set to false");
@@ -261,7 +338,7 @@ public class GameEngine {
         // Update advanced bots using AdvancedBotManager
         AdvancedBotManager.updateAdvancedBots(room, state, snakes);
 
-        GameWebSocket.broadcastState(room.getCode(), state);
+        SpectatorWebSocket.broadcastToAll(room.getCode(), state);
         if (TICK_DEBUG) {
             StringBuilder sb = new StringBuilder();
             for (Snake s : snakes) {
@@ -291,6 +368,9 @@ public class GameEngine {
     }
 
     private static Food spawnFood(Room room) {
+        int gridSize = room.getGridSize() > 0 ? room.getGridSize() : DEFAULT_GRID_SIZE;
+        boolean enableGoldenFood = room.isEnableGoldenFood();
+        
         Random rand = new Random();
         Set<Point> occupied = new HashSet<>();
         for (Snake snake : room.getPlayers()) {
@@ -298,8 +378,8 @@ public class GameEngine {
         }
 
         List<Point> free = new ArrayList<>();
-        for (int x = 0; x < GRID_SIZE; x++) {
-            for (int y = 0; y < GRID_SIZE; y++) {
+        for (int x = 0; x < gridSize; x++) {
+            for (int y = 0; y < gridSize; y++) {
                 Point p = new Point(x, y);
                 if (!occupied.contains(p)) free.add(p);
             }
@@ -307,8 +387,13 @@ public class GameEngine {
 
         if (free.isEmpty()) return new Food(0, 0);
         Point pos = free.get(rand.nextInt(free.size()));
-        String type = rand.nextDouble() < 0.15 ? "GOLDEN" : "NORMAL";
-        return new Food(pos.getX(), pos.getY(), type);
+        String type = "NORMAL";
+        if (enableGoldenFood && rand.nextDouble() < 0.15) {
+            type = "GOLDEN";
+        }
+        Food food = new Food(pos.getX(), pos.getY(), type);
+        // Note: Logging is handled by the caller (initGameState logs "initial", tick logs "respawn" or "collisionDeath")
+        return food;
     }
 
     public static void stopGame(String roomCode) {
@@ -330,11 +415,23 @@ public class GameEngine {
     }
 
     public static void resetGame(Room room) {
+        // Clear any stale WebSocket sessions from previous round
+        GameWebSocket.clearRoomSessions(room.getCode());
+        
         synchronized (room) {
             List<Snake> existingPlayers = new ArrayList<>(room.getPlayers());
+            
+            int gridSize = room.getGridSize() > 0 ? room.getGridSize() : DEFAULT_GRID_SIZE;
+            int margin = Math.max(3, gridSize / 10); // At least 3 cells from edge
+            int offset = gridSize - margin - 1;
 
             // Assign spawn positions & directions based on 4-quadrant layout
-            Point[] spawnHeads = { new Point(5, 5), new Point(24, 5), new Point(5, 24), new Point(24, 24) };
+            Point[] spawnHeads = { 
+                new Point(margin, margin), 
+                new Point(offset, margin), 
+                new Point(margin, offset), 
+                new Point(offset, offset) 
+            };
             String[] spawnDirs = { "RIGHT", "LEFT", "RIGHT", "LEFT" };
 
             for (int i = 0; i < existingPlayers.size(); i++) {
@@ -416,7 +513,8 @@ public class GameEngine {
      * @return the set of snakes killed by collision this tick (they are marked dead)
      */
     static Set<Snake> resolveHeadBodyCollisions(List<Snake> snakes, Map<Snake, Point> nextHeads,
-                                               Map<Snake, List<Point>> paths, List<Food> foods) {
+                                               Map<Snake, List<Point>> paths, List<Food> foods,
+                                               String roomCode, int tick) {
         Set<Snake> collisionDeaths = new HashSet<>();
 
         // Head-on collisions: any cell occupied by 2+ different heads during this
@@ -434,9 +532,14 @@ public class GameEngine {
             if (entry.getValue().size() >= 2) {
                 Set<Snake> distinct = new HashSet<>(entry.getValue());
                 if (distinct.size() >= 2) {
+                    String[] otherPlayers = distinct.stream()
+                        .map(Snake::getName)
+                        .toArray(String[]::new);
                     for (Snake snake : distinct) {
                         snake.setAlive(false);
                         collisionDeaths.add(snake);
+                        // Log head-on collision for each snake
+                        GameLogger.collisionHeadOn(roomCode, snake.getName(), tick, entry.getKey().getX(), entry.getKey().getY(), otherPlayers);
                     }
                 }
             }
@@ -478,6 +581,8 @@ public class GameEngine {
                     // Crossing its OWN body is allowed (hybrid .io rule).
                     attacker.setAlive(false);
                     collisionDeaths.add(attacker);
+                    // Log head-body collision
+                    GameLogger.collisionHeadBody(roomCode, attacker.getName(), tick, cell.getX(), cell.getY(), bodyOwner.getName());
                     break;
                 }
             }
@@ -531,7 +636,7 @@ public class GameEngine {
      *
      * @return true if a tail segment was shed into {@code foods} this tick
      */
-    static boolean applyHybridBoost(Snake snake, GameState state, List<Food> foods) {
+    static boolean applyHybridBoost(Snake snake, GameState state, List<Food> foods, String roomCode) {
         if (!snake.isAlive()) {
             snake.setBoosting(false);
             snake.setSpeedMultiplier(1.0f);
@@ -550,6 +655,8 @@ public class GameEngine {
                 segs.remove(segs.size() - 1);
                 if (foods.size() < MAX_FOODS) {
                     foods.add(new Food(tail.getX(), tail.getY(), "NORMAL"));
+                    // Log boost segment shed
+                    GameLogger.boostShedSegment(roomCode, snake.getName(), tail.getX(), tail.getY());
                     return true;
                 }
             }

@@ -16,6 +16,10 @@ public class Snake {
     private long disconnectedSince;
     private static final long DISCONNECT_TIMEOUT = 10_000;
 
+    // Reconnection support
+    private String reconnectToken;
+    private long lastDisconnectTime;
+
     // Speed boost fields
     private boolean speedBoostActive = false;
     private long speedBoostEndTime = 0;
@@ -59,6 +63,12 @@ public class Snake {
 
     public long getLastActivity() { return lastActivity; }
     public long getDisconnectedSince() { return disconnectedSince; }
+
+    // Reconnection token methods
+    public String getReconnectToken() { return reconnectToken; }
+    public void setReconnectToken(String reconnectToken) { this.reconnectToken = reconnectToken; }
+    public long getLastDisconnectTime() { return lastDisconnectTime; }
+    public void setLastDisconnectTime(long lastDisconnectTime) { this.lastDisconnectTime = lastDisconnectTime; }
 
     public Snake(String name, String color, Point start) {
         this();

@@ -1,7 +1,7 @@
 package com.snake.game.db;
 
 import java.sql.*;
-import java.util.Map;
+import java.util.*;
 import java.util.Properties;
 import java.util.Optional;
 import org.mindrot.jbcrypt.BCrypt;
@@ -24,6 +24,13 @@ public class DatabaseManager {
         } catch (ClassNotFoundException e) {
             throw new RuntimeException("PostgreSQL driver not found", e);
         }
+    }
+
+    /**
+     * Returns the database URL (sanitized for health checks).
+     */
+    public static String getUrl() {
+        return URL;
     }
     
     private static void loadCredentials() {
@@ -227,5 +234,130 @@ public class DatabaseManager {
             throw new RuntimeException("Failed to get stats", e);
         }
         return null;
+    }
+
+    public static Map<String, Object> getProfile(String username) {
+        String sql = "SELECT username, created_at, last_login, total_games, total_score, high_score FROM players WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                Map<String, Object> profile = new java.util.HashMap<>();
+                profile.put("username", rs.getString("username"));
+                profile.put("createdAt", rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toString() : null);
+                profile.put("lastLogin", rs.getTimestamp("last_login") != null ? rs.getTimestamp("last_login").toString() : null);
+                profile.put("totalGames", rs.getInt("total_games"));
+                profile.put("totalScore", rs.getInt("total_score"));
+                profile.put("highScore", rs.getInt("high_score"));
+                return profile;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to get profile", e);
+        }
+        return null;
+    }
+
+    public static boolean updatePassword(String username, String newPasswordHash) {
+        String sql = "UPDATE players SET password_hash = ? WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, newPasswordHash);
+            stmt.setString(2, username);
+            int rows = stmt.executeUpdate();
+            return rows > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update password", e);
+        }
+    }
+
+    public static boolean updateUsername(String oldUsername, String newUsername) {
+        String sql = "UPDATE players SET username = ? WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, newUsername);
+            stmt.setString(2, oldUsername);
+            int rows = stmt.executeUpdate();
+            return rows > 0;
+        } catch (SQLException e) {
+            if (e.getSQLState().equals("23505")) return false;
+            throw new RuntimeException("Failed to update username", e);
+        }
+    }
+
+    public static boolean deleteUser(String username) {
+        String sql = "DELETE FROM players WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username);
+            int rows = stmt.executeUpdate();
+            return rows > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to delete user", e);
+        }
+    }
+
+    public static boolean checkPasswordHash(String username, String password) {
+        String sql = "SELECT password_hash FROM players WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                String storedHash = rs.getString("password_hash");
+                return checkPassword(password, storedHash);
+            }
+            return false;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check password", e);
+        }
+    }
+
+    public static String hashPasswordForStorage(String password) {
+        return hashPassword(password);
+    }
+
+    /**
+     * Returns a paginated leaderboard ordered by high_score DESC, total_score DESC.
+     * Ties are broken by total_score then username.
+     *
+     * @param limit  maximum number of entries to return
+     * @param offset number of entries to skip
+     * @return list of maps with username, totalGames, totalScore, highScore, createdAt
+     */
+    public static List<Map<String, Object>> getLeaderboard(int limit, int offset) {
+        String sql = "SELECT username, total_games, total_score, high_score, created_at " +
+                "FROM players ORDER BY high_score DESC, total_score DESC, username ASC LIMIT ? OFFSET ?";
+        List<Map<String, Object>> leaderboard = new ArrayList<>();
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, limit);
+            stmt.setInt(2, offset);
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                Map<String, Object> entry = new HashMap<>();
+                entry.put("username", rs.getString("username"));
+                entry.put("totalGames", rs.getInt("total_games"));
+                entry.put("totalScore", rs.getInt("total_score"));
+                entry.put("highScore", rs.getInt("high_score"));
+                entry.put("createdAt", rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toString() : null);
+                leaderboard.add(entry);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to get leaderboard", e);
+        }
+        return leaderboard;
+    }
+
+    /**
+     * Returns the total number of registered players.
+     *
+     * @return total player count
+     */
+    public static int getTotalPlayerCount() {
+        String sql = "SELECT COUNT(*) FROM players";
+        try (Connection conn = getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to get total player count", e);
+        }
+        return 0;
     }
 }

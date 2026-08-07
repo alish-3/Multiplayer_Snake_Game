@@ -8,6 +8,7 @@ import com.snake.game.model.GameState;
 import com.snake.game.model.Room;
 import com.snake.game.model.Snake;
 import com.snake.game.util.BotManager;
+import com.snake.game.util.RateLimiter;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -42,7 +43,7 @@ public class GameServlet extends HttpServlet {
                 Map<String, Object> waiting = new HashMap<>();
                 waiting.put("snakes", room.getPlayers());
                 waiting.put("food", null);
-                waiting.put("gridSize", 30);
+                waiting.put("gridSize", room.getGridSize() > 0 ? room.getGridSize() : 30);
                 waiting.put("gameOver", false);
                 waiting.put("gameStarted", false);
                 waiting.put("tick", 0);
@@ -61,6 +62,9 @@ public class GameServlet extends HttpServlet {
         resp.setContentType("application/json");
         resp.setCharacterEncoding("UTF-8");
 
+        // Extract client identifier for rate limiting (player name if available, otherwise IP)
+        String clientKey = getClientKey(req, null);
+
         BufferedReader reader = req.getReader();
         JsonObject json = gson.fromJson(reader, JsonObject.class);
         if (json == null || !json.has("action") || json.get("action").isJsonNull()) {
@@ -70,6 +74,16 @@ public class GameServlet extends HttpServlet {
         String action = json.get("action").getAsString();
         String roomCode = json.has("roomCode") && !json.get("roomCode").isJsonNull() ? json.get("roomCode").getAsString() : null;
         String playerName = json.has("playerName") && !json.get("playerName").isJsonNull() ? json.get("playerName").getAsString() : null;
+
+        // Update client key with player name if available for per-player limiting
+        if (playerName != null) {
+            clientKey = "player:" + playerName;
+        }
+
+        // Apply rate limiting based on action
+        if (!checkRateLimit(req, resp, action, clientKey)) {
+            return; // Rate limited response already sent
+        }
 
         if (roomCode == null || !roomCode.matches("^[A-Z2-9]{6}$")) {
             resp.getWriter().write(gson.toJson(Map.of("success", false, "error", "Invalid room code")));
@@ -102,6 +116,80 @@ public class GameServlet extends HttpServlet {
             default:
                 resp.getWriter().write(gson.toJson(Map.of("success", false, "error", "Unknown action")));
         }
+    }
+
+    /**
+     * Checks rate limit for the given action and client key.
+     * Returns true if allowed, false if rate limited (response already sent).
+     */
+    private boolean checkRateLimit(HttpServletRequest req, HttpServletResponse resp, String action, String clientKey) throws IOException {
+        RateLimiter limiter = RateLimiter.getInstance();
+        boolean allowed;
+        long retryAfterMs;
+        String errorMessage;
+
+        switch (action) {
+            case "move":
+                // 10 requests per 100ms per player
+                allowed = limiter.tryConsume(clientKey, 10, 100);
+                retryAfterMs = limiter.getRetryAfterMs(clientKey, 10, 100);
+                errorMessage = "Rate limit exceeded for move action (max 10 per 100ms)";
+                break;
+            case "ready":
+                // 5 requests per second per player
+                allowed = limiter.tryConsume(clientKey, 5, 1000);
+                retryAfterMs = limiter.getRetryAfterMs(clientKey, 5, 1000);
+                errorMessage = "Rate limit exceeded for ready action (max 5 per second)";
+                break;
+            case "boost":
+                // 20 requests per 100ms per player
+                allowed = limiter.tryConsume(clientKey, 20, 100);
+                retryAfterMs = limiter.getRetryAfterMs(clientKey, 20, 100);
+                errorMessage = "Rate limit exceeded for boost action (max 20 per 100ms)";
+                break;
+            default:
+                return true; // No rate limiting for other actions
+        }
+
+        if (!allowed) {
+            resp.setStatus(429); // Too Many Requests
+            resp.setHeader("Retry-After", String.valueOf((retryAfterMs + 999) / 1000)); // Seconds, rounded up
+            resp.getWriter().write(gson.toJson(Map.of(
+                "success", false,
+                "error", errorMessage,
+                "retryAfterMs", retryAfterMs
+            )));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Gets a client identifier for rate limiting.
+     * Uses player name if provided, otherwise extracts IP from request.
+     */
+    private String getClientKey(HttpServletRequest req, String playerName) {
+        if (playerName != null && !playerName.isEmpty()) {
+            return "player:" + playerName;
+        }
+        return "ip:" + getClientIp(req);
+    }
+
+    /**
+     * Extracts client IP from request, checking proxy headers first.
+     */
+    private String getClientIp(HttpServletRequest req) {
+        String ip = req.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isEmpty()) {
+            // X-Forwarded-For can contain multiple IPs, take the first one
+            ip = ip.split(",")[0].trim();
+        } else {
+            ip = req.getHeader("X-Real-IP");
+        }
+        if (ip == null || ip.isEmpty()) {
+            ip = req.getRemoteAddr();
+        }
+        return ip;
     }
 
     private void handleJoin(Room room, String playerName, HttpServletResponse resp) throws IOException {
@@ -217,7 +305,8 @@ public class GameServlet extends HttpServlet {
 
     private void handleLeave(Room room, String playerName, HttpServletResponse resp) throws IOException {
         synchronized (room) {
-            room.removePlayer(playerName);
+            // Use RoomManager method to remove player and log
+            roomManager.removePlayerFromRoom(room.getCode(), playerName, "left");
             // If only bots remain, no humans are watching - tear the room down
             if (BotManager.hasOnlyBots(room)) {
                 BotManager.removeBots(room);
@@ -226,7 +315,8 @@ public class GameServlet extends HttpServlet {
             }
         }
 
-        if (room.getPlayerCount() == 0) {
+        Room updatedRoom = roomManager.getRoom(room.getCode());
+        if (updatedRoom != null && updatedRoom.getPlayerCount() == 0) {
             GameEngine.stopGame(room.getCode());
             roomManager.removeRoom(room.getCode());
         }

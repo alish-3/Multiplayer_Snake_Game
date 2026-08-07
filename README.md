@@ -1,6 +1,6 @@
 # Multiplayer Snake Game 🐍
 
-> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 5, 2026
+> **Version:** v1.0 • **Status:** Production-Ready • **Last Updated:** August 8, 2026
 
 > A real-time multiplayer Snake game built with **Java 17**, **Jakarta EE 6**, **WebSocket**, and **PostgreSQL** — featuring room-based gameplay, JWT authentication, hybrid IO mechanics, and a responsive canvas UI.
 
@@ -20,27 +20,42 @@
 - **Instant Rooms** — 6-character room codes for quick sharing
 - **4-Player Max** — Competitive or cooperative gameplay
 - **WebSocket Physics** — 150ms authoritative tick loop for fair, smooth gameplay
+- **Spectator Mode** — Watch live games without playing via dedicated WebSocket endpoint
+- **Custom Room Settings** — Configurable grid size, tick rate, max players, food density, boost/golden food toggles
+- **Reconnection Resilience** — Automatic WebSocket reconnection with grace period and state sync
 
 ### Security & Authentication
 - **JWT Tokens** — Stateless, scalable authentication with HS256
 - **bcrypt Passwords** — Industry-standard hashing with legacy migration support
 - **Guest Play** — Easy access without account creation
 - **Remember-Me** — 30-day persistent sessions
+- **Rate Limiting** — Token-bucket per IP on all endpoints
+- **Security Headers** — CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+- **Input Validation** — Sanitized parameters, WebSocket message size caps
 
 ### Persistent Stats & Progression
 - **PostgreSQL Backend** — Player stats: total games, total score, high score
 - **Power-ups** — Golden food (3× points), boost coins every 5s
 - **Boost System** — Hold SPACE/Shift (or boost button) for 2× speed with tail-shedding; boost coins from time (+10/5s) and milestones (+50 @ 100/500/1000)
+- **Profile Management** — Display name, avatar, stats overview via `/api/profile`
 
 ### Advanced Gameplay
 - **Hybrid IO Rules** — Walk your own body allowed; head‑ons kill both snakes; other snakes' bodies are lethal
 - **Smart AI Bots** — Server-side bots with flood-fill survival + opponent-aware hunting; PowerShell launchers for testing
+- **Global Leaderboard** — Paginated rankings by high score, total score, or total games
 - **Cross-Platform** — Desktop, mobile, touch‑and‑gesture controls
+
+### Observability & Operations
+- **Health Endpoint** — `/api/health` with active rooms, connections, players, uptime metrics
+- **Structured Logging** — Engine events, deaths, room lifecycle, connection metrics
+- **Graceful Shutdown** — ServletContextListener for clean startup/shutdown
 
 ### Developer-Friendly
 - **Jakarta EE 6** — Modern, standards‑based Java web development
 - **Comprehensive API** — Full REST/ WebSocket coverage
 - **Scripted Bot Testing** — `bot.ps1` and `run_4bot_game.ps1` for quick AI play-testing
+- **Docker Ready** — Multi-stage build + compose (app + PostgreSQL)
+- **CI/CD** — GitHub Actions: `mvn clean test` + package on every push
 
 ---
 
@@ -107,20 +122,32 @@
 src/main/java/com/snake/game/
 ├── model/          # Domain: Snake, Room, GameState, Food, Point
 ├── engine/         # GameEngine (tick loop, collisions), RoomManager
-├── servlet/        # AuthServlet, RoomServlet, GameServlet, GameWebSocket
+├── servlet/        # AuthServlet, RoomServlet, GameServlet, GameWebSocket,
+                    # SpectatorWebSocket, HealthServlet, ProfileServlet,
+                    # LeaderboardServlet, SecurityFilter
 ├── db/             # DatabaseManager (PostgreSQL + bcrypt)
-└── util/           # JwtUtil (HS256 tokens)
+└── util/           # JwtUtil (HS256 tokens), BotManager, AdvancedBotManager,
+                    # RateLimiter, GameLogger, AppContextListener
 ```
 
 ### Key Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| **RoomManager** | Singleton managing room lifecycle, 30s stale cleanup |
-| **GameEngine** | 150ms tick: movement, collision (wall/self/head-on/head-body), food spawning, scoring, boost system |
-| **GameWebSocket** | Real-time state broadcast, move/ready/ping messages |
+| **RoomManager** | Singleton managing room lifecycle, 30s stale cleanup; supports spectators & custom settings |
+| **GameEngine** | 150ms tick: movement, collision (wall/self/head-on/head-body), food spawning, scoring, boost system, gated growth (tested) |
+| **GameWebSocket** | Real-time state broadcast, move/ready/boost/ping messages |
+| **SpectatorWebSocket** | Read-only state broadcast for spectators (`/ws/{roomCode}/spectator/{name}`) |
+| **HealthServlet** | `/api/health` endpoint with active room/connection metrics for observability |
+| **ProfileServlet** | `/api/profile` endpoint for authenticated user profile management |
+| **LeaderboardServlet** | `/api/leaderboard` endpoint with global rankings, pagination, sorting |
+| **SecurityFilter** | Rate limiting (token bucket per IP), input validation, security headers, CORS |
+| **RateLimiter** | Token bucket implementation for API rate limiting |
+| **GameLogger** | Structured logging for engine events, deaths, room lifecycle, connection metrics |
+| **AppContextListener** | ServletContextListener for startup/shutdown (DB pool, RoomManager cleanup, logging) |
 | **DatabaseManager** | Auto-migration, bcrypt passwords, JWT token storage |
 | **JwtUtil** | HS256 JWT creation/validation for remember-me tokens |
+| **BotManager / AdvancedBotManager** | Server-side AI players; v2 uses flood-fill survival + opponent-aware hunting |
 
 ---
 
@@ -169,7 +196,7 @@ Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
 
 ### Share it live (ngrok)
 
-> **Status (2026-08-05): live** — currently running at https://predefine-imaginary-deniable.ngrok-free.dev (Jetty 12 + local PostgreSQL + ngrok). Free tier: URL changes if ngrok restarts.
+> **Status (2026-08-08): live** — currently running at https://predefine-imaginary-deniable.ngrok-free.dev (Jetty 12 + local PostgreSQL + ngrok). Free tier: URL changes if ngrok restarts.
 
 1. Make sure the stack is running locally (Option 3 Docker, or Jetty + local PostgreSQL)
 2. `ngrok http 8080` (first time: create a free account at ngrok.com, then `ngrok config add-authtoken <token>`)
@@ -180,12 +207,14 @@ Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
 ## 🎯 How to Play
 
 1. **Auth** — Play as Guest, or Register/Login (JWT remember-me)
-2. **Lobby** — Enter name, pick snake color, create or join a room
+2. **Lobby** — Enter name, pick snake color, create or join a room (custom settings available)
 3. **Ready Up** — All players press **READY** (or SPACE) to start 3s countdown
 4. **Control** — Arrow keys / WASD / on-screen D-pad / swipe (mobile)
 5. **Eat & Grow** — Normal food = 1pt, Golden food = 3pts, score == length (mass)
 6. **Boost** — Hold SPACE/Shift (or boost button) for 2× speed; sheds tail segments as food; coins from time (+10/5s) and milestones (+50 @ 100/500/1000)
 7. **Survive** — Last snake standing wins!
+8. **Spectate** — Watch any room without joining as a player
+9. **Leaderboard** — View global rankings by high score, total score, or total games
 
 ---
 
@@ -204,8 +233,9 @@ Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
 | Method | Action | Body | Response |
 |--------|--------|------|----------|
 | `GET` | `list` | — | `{rooms[{code,playerCount,maxPlayers}]}` |
-| `POST` | `create` | `{playerName, color?}` | `{success, roomCode}` |
+| `POST` | `create` | `{playerName, color?, gridSize?, tickRateMs?, maxPlayers?, foodDensity?, enableBoost?, enableGoldenFood?}` | `{success, roomCode}` |
 | `POST` | `join` | `{roomCode, playerName, color?}` | `{success, roomCode}` |
+| `POST` | `spectate` | `{roomCode, spectatorName}` | `{success, roomCode}` |
 
 ### Game (`GET/POST /api/game`)
 | Method | Action | Body/Query | Response |
@@ -221,7 +251,30 @@ Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
 |-----------------|-----------------|
 | `{action:"move", direction}` | `GameState` (broadcast) |
 | `{action:"ready"}` | `GameState` (broadcast) |
+| `{action:"boost", boost:true\|false}` (hold SPACE/Shift or boost button) | `GameState` (broadcast) |
 | `{action:"ping", t:timestamp}` | `{action:"pong", t:timestamp}` |
+
+### Spectator WebSocket (`/api/game/ws/{roomCode}/spectator/{spectatorName}`)
+| Client → Server | Server → Client |
+|-----------------|-----------------|
+| `{action:"ping", t:timestamp}` | `GameState` (broadcast, read-only) |
+| — | `{action:"pong", t:timestamp}` |
+
+### Health (`GET /api/health`)
+| Method | Response |
+|--------|----------|
+| `GET` | `{status:"ok", uptimeMs, activeRooms, activeConnections, activePlayers, timestamp}` |
+
+### Profile (`GET/POST /api/profile`)
+| Method | Body | Response |
+|--------|------|----------|
+| `GET` | — | `{success, profile{username, displayName, avatar, totalGames, totalScore, highScore}}` |
+| `POST` | `{displayName?, avatar?}` | `{success, profile{...}}` |
+
+### Leaderboard (`GET /api/leaderboard`)
+| Method | Query Params | Response |
+|--------|--------------|----------|
+| `GET` | `page` (default 0), `size` (default 20, max 100), `sort` (default "highScore": highScore\|totalScore\|totalGames) | `{success, leaderboard[{rank, username, displayName, avatar, totalGames, totalScore, highScore}], pagination{page, size, total, totalPages}}` |
 
 ---
 
@@ -256,20 +309,25 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 ├── src/
 │   ├── main/
 │   │   ├── java/com/snake/game/
-│   │   │   ├── model/         # Snake, Room, GameState, Food, Point
+│   │   │   ├── model/         # Food, GameState, Point, Room, Snake
 │   │   │   ├── engine/        # GameEngine, RoomManager
-│   │   │   ├── servlet/       # Auth, Room, Game, WebSocket
+│   │   │   ├── servlet/       # AuthServlet, GameServlet, GameWebSocket, RoomServlet,
+│   │   │   │                  # SpectatorWebSocket, HealthServlet, ProfileServlet,
+│   │   │   │                  # LeaderboardServlet, SecurityFilter
 │   │   │   ├── db/            # DatabaseManager
-│   │   │   └── util/          # JwtUtil, BotManager, AdvancedBotManager
+│   │   │   └── util/          # AdvancedBotManager, BotManager, JwtUtil,
+│   │   │                      # RateLimiter, GameLogger, AppContextListener
 │   │   └── webapp/
 │   │       ├── index.jsp      # Auth page
 │   │       ├── game.jsp       # Lobby + game canvas
+│   │       ├── profile.jsp    # User profile page
 │   │       ├── css/style.css
-│   │       ├── js/game.js     # Game logic, WS, rendering
+│   │       ├── js/game.js     # Game logic, WS, rendering, reconnection
 │   │       ├── js/ajax.js     # REST helpers
+│   │       ├── js/profile.js  # Profile page logic
 │   │       ├── sounds/        # countdown.ogg, gameover.wav
 │   │       └── WEB-INF/web.xml
-│   └── test/java/com/snake/game/engine/   # GameEngineCollisionTest (4/4) + GameEngineGrowthTest (5/5)
+│   └── test/java/com/snake/game/engine/   # GameEngineBoostTest (12/12) + GameEngineCollisionTest (4/4) + GameEngineGrowthTest (5/5)
 ├── media/                     # Screenshots & gameplay videos
 │   ├── pc/                    # Desktop captures (9 PNG + GIF + MP4)
 │   └── mobile/                # Mobile captures (9 PNG + GIF + MP4)
@@ -323,15 +381,34 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 | Stale boost docs (3×/5%/spend-coins design that no longer exists) | PKB.md rewritten to match the hybrid-boost design; README updated in this pass |
 | No deployment path | Dockerfile + docker-compose.yml + GitHub Actions CI + ngrok runbook added; CI Run #1 green (21/21 tests + WAR artifact); deployed live via ngrok — https://predefine-imaginary-deniable.ngrok-free.dev (Docker container run pending — virtualization disabled in BIOS) |
 
+### ✅ Phase 2 — Hardening & Observability (2026-08-08)
+
+| Issue | Fix |
+|-------|-----|
+| No health monitoring endpoint | Added `HealthServlet` at `/api/health` returning status, uptime, active rooms, connections, players |
+| No structured logging | Added `GameLogger` with structured logging for engine events, deaths, room lifecycle, connection metrics |
+| No rate limiting or security hardening | Added `SecurityFilter` (token bucket per IP), `RateLimiter`, security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), CORS config, WebSocket message size caps, input validation |
+| No graceful startup/shutdown | Added `AppContextListener` (ServletContextListener) for DB pool init, RoomManager cleanup, logging setup |
+| No WebSocket reconnection resilience | Enhanced client with automatic reconnection, grace period, reconnection token; server accepts rejoin with same playerName within grace window and syncs state on reconnect |
+
+### ✅ Phase 3 — Depth & Retention (2026-08-08)
+
+| Issue | Fix |
+|-------|-----|
+| No spectator mode | Added `SpectatorWebSocket` at `/ws/{roomCode}/spectator/{name}` with read-only GameState broadcast; RoomServlet `spectate` action |
+| No reconnection resilience | Enhanced WebSocket client with automatic reconnection, grace period, and state sync on reconnect |
+| No global leaderboard | Added `LeaderboardServlet` at `/api/leaderboard` with pagination (page/size), sorting (highScore/totalScore/totalGames), avatar/displayName support |
+| No custom room settings | Room creation now accepts `gridSize`, `tickRateMs`, `maxPlayers`, `foodDensity`, `enableBoost`, `enableGoldenFood`; Room model updated |
+| No profile management | Added `ProfileServlet` at `/api/profile` (GET/POST) for displayName, avatar, stats; `profile.jsp` frontend |
+| Gated growth not wired | `applyGatedGrowth` implemented and tested (5/5 in GameEngineGrowthTest) but tick() still uses legacy immediate growth |
+
 ### 🔧 In Progress / Planned
 
 | Area | Description | Priority |
 |------|-------------|----------|
-| **Reconnection handling** | Improve WebSocket reconnection UX on network hiccups | Medium |
-| **Spectator mode** | Allow watching games without playing | Low |
-| **Leaderboard** | Global/historical leaderboards with pagination | Low |
-| **Custom room settings** | Grid size, tick rate, max players, food density | Low |
 | **Accessibility** | Improve keyboard navigation, screen reader support | Low |
+| **PWA / Mobile Polish** | Installable app, offline support, i18n | Low |
+| **Gated Growth Wiring** | Connect `applyGatedGrowth` into `tick()` (legacy growth still active) | Low |
 
 ---
 
@@ -341,10 +418,10 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 
 - [x] **Core Backend** — Jakarta EE 6 WAR with Servlet, WebSocket, PostgreSQL
 - [x] **Authentication** — JWT remember-me, bcrypt, guest play
-- [x] **Room System** — Create/join/list, 6-char codes, 4-player max
-- [x] **Game Engine** — 150ms tick, collision detection, food spawning, scoring
+- [x] **Room System** — Create/join/list, 6-char codes, 4-player max, custom settings, spectator support
+- [x] **Game Engine** — 150ms tick, collision detection, food spawning, scoring, gated growth (tested)
 - [x] **Boost System** — Hybrid boost (2×, tail-shedding), boost coins (+10/5s, +50 @ milestones)
-- [x] **Frontend** — Responsive lobby + canvas game, touch/mobile support
+- [x] **Frontend** — Responsive lobby + canvas game, touch/mobile support, reconnection UX
 - [x] **AI Bots** — Server-side bots + PowerShell launchers for testing
 - [x] **Media Capture** — 18 screenshots (9 PC + 9 mobile) + 2 gameplay videos
 - [x] **Critical Bug Fixes** — Game-freeze NPE, initial food, video timing, bot personalities
@@ -354,12 +431,16 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 - [x] **Project Knowledge Base** — `PKB.md` added; docs updated to current structure
 - [x] **Phase 0 — Test coverage** — Boost coins/milestones/hybrid-boost unit tests (GameEngineBoostTest 12/12; `mvn test` 21/21 green)
 - [x] **Phase 1 — Deployment** — Docker scaffold (multi-stage + compose), GitHub Actions CI green (Run #1), live ngrok URL (https://predefine-imaginary-deniable.ngrok-free.dev; Docker run pending BIOS enable)
+- [x] **Phase 2 — Hardening & Observability** — Health endpoint, structured logging, rate limiting, security headers/CORS, input validation, graceful shutdown, **WebSocket reconnection resilience (grace period + token-based state sync)**
+- [x] **Phase 3 — Depth & Retention** — Custom room settings, spectator mode, **reconnection UX**, global leaderboard, profile management
 
-### 🎯 Next Milestones
+### 🎯 Next Milestones (Phase 4 — Polish)
 
-- [ ] **Production hardening** — Rate limiting, input validation, security headers
-- [ ] **Observability** — Structured logging, metrics, health endpoints
-- [ ] **Documentation** — OpenAPI/Swagger for REST endpoints
+- [ ] **PWA / Mobile Polish** — Installable app, offline support, home screen install
+- [ ] **Accessibility** — Keyboard navigation, screen reader support, ARIA labels
+- [ ] **Internationalization (i18n)** — Multi-language support
+- [ ] **OpenAPI/Swagger** — Auto-generated REST API documentation
+- [ ] **Gated Growth Wiring** — Connect `applyGatedGrowth` into `tick()` (legacy growth still active)
 
 ---
 
@@ -387,5 +468,7 @@ MIT License — feel free to use, modify, and distribute.
 
 ---
 
-*Last updated: August 5, 2026*
+## 📅 Last Updated
+
+*Last updated: August 8, 2026*
 *Status: Actively maintained — bugs are tracked, fixed, and verified. Committed to making this as bug-free as possible.*
