@@ -1,106 +1,31 @@
-# Build outputs
+﻿# Build outputs
 target/
 dist/
 *.war
 *.class
 
-# Maven (keep wrapper, ignore local)
+# Maven wrapper (keep wrapper JAR and properties)
 !.mvn/wrapper/maven-wrapper.jar
 !.mvn/wrapper/maven-wrapper.properties
 
-### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
-*.iws
+# IDE
+.idea/
+.smarttomcat/
 *.iml
+*.iws
 *.ipr
-.idea/workspace.xml
-
-### Eclipse / NetBeans / VS Code ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
 .vscode/
+*.swp
 
-### Mac OS ###
+# OS
 .DS_Store
 
-# Local logs
+# Logs
 *.log
-jetty-run.log
-jetty.log
+logs/
+jsp/
 
-# JSP compile scratch (Jetty writes compiled JSPs to a root-level jsp/ dir)
-/jsp/
-
-# Runtime log output (GameLogger)
-/logs/
-
-# Browser test tooling (Playwright MCP)
-.playwright-mcp/
-
-# Local git operations log
-git.md
-
-# Agent documentation
-AGENTS.md
-
-# ===== TEST INFRASTRUCTURE (EXCLUDED FROM REPO) =====
-# Node / Playwright
-node_modules/
-package-lock.json
-package.json
-tsconfig.json
-playwright.config.ts
-playwright.tickdebug.config.ts
-capture.config.ts
-playwright-report/
-test-results/
-
-# TypeScript bot source (test-only)
-src/bot.ts
-src/bot-controller.ts
-
-# Playwright tests
-tests/
-
-# Automation scripts & docs
-scripts/
-AUTOMATION_README.md
-run-screenshots.ps1
-add_bots.ps1
-join_bots.ps1
-
-# Loose temp screenshots
-ui-*.png
-
-# IntelliJ Smart Tomcat plugin
-.smarttomcat/
-
-# Debug/playtest screenshots
-debug-*.png
-playtest-*.png
-verify-*.png
-
-# Screenshot logs
-screenshot-*.txt
-
-# Duplicate root js folder (use src/main/webapp/js/ instead)
-/js/
-
-# Local env file for docker-compose (never commit real secrets)
+# Local env (never commit real secrets)
 .env
 
 # System & editor noise
@@ -109,6 +34,5 @@ screenshot-*.txt
 *.orig
 *.rej
 *~
-*.swp
 *.hprof
 hs_err_pid*

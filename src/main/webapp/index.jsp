@@ -403,7 +403,8 @@
                     }
                     showLobby();
                 } else {
-                    showAuthError('loginError', data.error || I18n.t('loginFailed'));
+                    var errorMsg = data.errorKey ? I18n.t(data.errorKey) : (data.error || I18n.t('loginFailed'));
+                    showAuthError('loginError', errorMsg);
                 }
             });
         });
@@ -451,7 +452,8 @@
                     currentUser = data.username;
                     showLobby();
                 } else {
-                    showAuthError('regError', data.error || I18n.t('registrationFailed'));
+                    var errorMsg = data.errorKey ? I18n.t(data.errorKey) : (data.error || I18n.t('registrationFailed'));
+                    showAuthError('regError', errorMsg);
                 }
             });
         });

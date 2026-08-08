@@ -168,7 +168,7 @@
                 <button class="modal-close" id="closeSettings" aria-label="Close Settings" data-i18n-aria="close">×</button>
             </div>
             <div class="modal-body">
-                <div class="setting-group">
+                <div class="setting-group control-scheme-group">
                     <h4 data-i18n="controlScheme">Control Scheme</h4>
                     <div class="radio-group">
                         <label class="radio-label">

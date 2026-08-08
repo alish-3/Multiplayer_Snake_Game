@@ -1828,11 +1828,14 @@ html.swipe-mode .touch-dpad { display: none !important; }
         top: 0;
         left: 0;
         right: 0;
-        height: calc(48px + env(safe-area-inset-top));
+        height: auto;
+        min-height: calc(74px + env(safe-area-inset-top));
         padding: env(safe-area-inset-top) 4px 0;
         align-items: center;
         justify-content: space-between;
         gap: 2px;
+        flex-wrap: wrap;
+        align-content: flex-start;
         background: rgba(22, 33, 62, 0.96);
         border-bottom: 1px solid var(--border);
         backdrop-filter: blur(8px);
@@ -1864,6 +1867,10 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .mobile-header-left {
         font-size: 10.5px;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1 1 auto;
+        min-width: 0;
     }
 
     .mobile-room {
@@ -1878,8 +1885,12 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .mobile-score span { color: var(--text); font-family: var(--mono); font-weight: 700; }
 
     .mobile-header-center {
-        flex: 1;
+        flex: 1 1 100%;
+        order: 3;
         justify-content: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 2px 4px 4px;
         font-size: 10px;
         color: var(--text-dim);
         white-space: nowrap;
@@ -1888,11 +1899,11 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .mobile-header-center span { white-space: nowrap; }
     .mobile-rank { color: var(--gold); font-weight: 700; }
     .mobile-alive span, .mobile-ping span { color: var(--text); font-family: var(--mono); font-weight: 700; }
-    .mobile-header-right { justify-content: flex-end; }
+    .mobile-header-right { justify-content: flex-end; flex: 0 0 auto; }
 
     .game-wrapper {
-        margin-top: calc(48px + env(safe-area-inset-top));
-        height: calc(100dvh - 48px - env(safe-area-inset-top));
+        margin-top: calc(74px + env(safe-area-inset-top));
+        height: calc(100dvh - 74px - env(safe-area-inset-top));
         padding: 4px;
         gap: 0;
     }
@@ -1975,7 +1986,7 @@ html.swipe-mode .touch-dpad { display: none !important; }
         transform: none;
     }
 
-    .game-toast { top: calc(56px + env(safe-area-inset-top)); }
+    .game-toast { top: calc(82px + env(safe-area-inset-top)); }
 }
 
 /* ---------- Mobile landscape ---------- */
@@ -1991,7 +2002,7 @@ html.swipe-mode .touch-dpad { display: none !important; }
 
     .sidebar {
         position: fixed;
-        top: calc(48px + env(safe-area-inset-top));
+        top: calc(74px + env(safe-area-inset-top));
         right: 0;
         bottom: 0;
         width: 190px;
@@ -2032,7 +2043,7 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .dpad-btn { width: 62px; height: 62px; font-size: 1.35em; border-radius: 14px; }
 
     .guest-bar {
-        top: calc(64px + env(safe-area-inset-top));
+        top: calc(90px + env(safe-area-inset-top));
         bottom: auto;
         left: 8px;
         right: auto;
@@ -2099,7 +2110,8 @@ html.swipe-mode .touch-dpad { display: none !important; }
     .sidebar { width: 260px; }
 
     #controlSchemeToggle,
-    .scores-close { display: none !important; }
+    .scores-close,
+    .setting-group.control-scheme-group { display: none !important; }
 
     .desktop-controls { display: block !important; }
 

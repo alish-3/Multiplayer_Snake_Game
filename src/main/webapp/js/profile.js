@@ -169,7 +169,8 @@ function initUsernameForm() {
                 var avatarEl = document.getElementById('profileAvatar');
                 if (avatarEl) avatarEl.textContent = data.username.charAt(0).toUpperCase();
             } else {
-                showFormError('usernameError', data.error || I18n.t('failedUpdateUsername'));
+                var errorMsg = data.errorKey ? I18n.t(data.errorKey) : (data.error || I18n.t('failedUpdateUsername'));
+                showFormError('usernameError', errorMsg);
             }
         });
     });

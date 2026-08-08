@@ -159,7 +159,7 @@ public class ProfileServlet extends HttpServlet {
             session.setAttribute("username", newUsername);
             resp.getWriter().write(gson.toJson(Map.of("success", true, "username", newUsername)));
         } else {
-            resp.getWriter().write(gson.toJson(Map.of("success", false, "error", "Username already taken")));
+            resp.getWriter().write(gson.toJson(Map.of("success", false, "errorKey", "usernameTaken")));
         }
     }
 

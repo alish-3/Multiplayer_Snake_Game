@@ -169,7 +169,7 @@ public class AuthServlet extends HttpServlet {
             session.setAttribute("isGuest", false);
             resp.getWriter().write(gson.toJson(Map.of("success", true, "username", username)));
         } else {
-            resp.getWriter().write(gson.toJson(Map.of("success", false, "error", "Username already taken")));
+            resp.getWriter().write(gson.toJson(Map.of("success", false, "errorKey", "usernameTaken")));
         }
     }
 

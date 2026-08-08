@@ -163,13 +163,18 @@ public class AdvancedBotManager {
         //    other bot can reach sooner.
         if (foods != null) {
             for (Food f : foods) {
-                int myDist = manhattan(next, f.getX(), f.getY());
+                // Path distance (BFS through free cells), not Manhattan: a
+                // food pocketed behind walls/bodies has no real path and must
+                // not lure the bot into orbiting it. Unreachable => zero bonus.
+                int myDist = bfsDist(next, f.getX(), f.getY(), occupied, 200);
+                if (myDist < 0) continue;
                 boolean claimed = true;
                 for (Snake other : snakes) {
                     if (other == bot || !other.isAlive()) continue;
                     Point otherHead = other.getHead();
                     if (otherHead == null) continue;
-                    if (manhattan(otherHead, f.getX(), f.getY()) < myDist) {
+                    int otherDist = bfsDist(otherHead, f.getX(), f.getY(), occupied, 200);
+                    if (otherDist >= 0 && otherDist < myDist) {
                         claimed = false;
                         break;
                     }
@@ -314,6 +319,46 @@ public class AdvancedBotManager {
             }
         }
         return count;
+    }
+
+    // ---------------------------------------------------------------
+    // BFS path distance (shortest path through free cells, capped)
+    // ---------------------------------------------------------------
+    /**
+     * Shortest path length from start to (tx,ty) through free cells.
+     * Returns -1 if unreachable (or if the cap is hit before finding it).
+     * 'blocked' = opponent body cells (already excludes this bot's own body).
+     */
+    private static int bfsDist(Point start, int tx, int ty, Set<Point> blocked, int cap) {
+        if (start == null || isWall(start) || blocked.contains(start)) return -1;
+        if (start.getX() == tx && start.getY() == ty) return 0;
+        boolean[][] visited = new boolean[GRID_SIZE][GRID_SIZE];
+        Deque<Point> queue = new ArrayDeque<>();
+        queue.add(start);
+        visited[start.getX()][start.getY()] = true;
+        int dist = 0, nodes = 0;
+        int[] dx = {0, 0, -1, 1};
+        int[] dy = {-1, 1, 0, 0};
+        while (!queue.isEmpty() && nodes < cap) {
+            int size = queue.size();
+            dist++;
+            for (int s = 0; s < size; s++) {
+                Point p = queue.poll();
+                nodes++;
+                for (int i = 0; i < 4; i++) {
+                    int nx = p.getX() + dx[i];
+                    int ny = p.getY() + dy[i];
+                    if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+                    if (visited[nx][ny]) continue;
+                    if (nx == tx && ny == ty) return dist; // reached food
+                    Point np = new Point(nx, ny);
+                    if (blocked.contains(np)) continue;
+                    visited[nx][ny] = true;
+                    queue.add(np);
+                }
+            }
+        }
+        return -1; // unreachable within cap
     }
 
     private static int countImmediateEscapes(Point head, Set<Point> occupied) {

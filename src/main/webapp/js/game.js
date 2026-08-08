@@ -87,12 +87,17 @@
     var lastPlayTime = { 3: 0, 2: 0, 1: 0 };
     var wasGameOver = false;
     var lastCountdownPlayTime = 0;
-    var countdownRetries = { 3: 0, 2: 0, 1: 0 };
     var lastServerTick = -1;
     // countdown.ogg is ALREADY a full 4-beep "3-2-1-Go" clip (beeps at 0/1/2/3s).
     // It must be played once per countdown, not once per number, so we track
     // that single play here instead of a per-number flag.
     var countdownClipPlayed = false;
+    // Countdown clip sync: estimate when the server's countdown started on the
+    // client clock so the clip can be started at an offset that keeps its
+    // internal beeps (0s="3", 1s="2", 2s="1", 3s="Go") aligned with the
+    // server's real-time 3-2-1, even if the AudioContext unlocks late.
+    var countdownStartClientTime = 0;
+    var countdownPlayPending = false;
 
     // Message queue for when WebSocket is connecting
     var wsMessageQueue = [];
@@ -316,6 +321,29 @@
         for (var i = 0; i < radioIds.length; i++) {
             var r = document.getElementById(radioIds[i]);
             if (r) r.addEventListener('change', function() { updateControlScheme(this.value); });
+        }
+
+        // BUG 2: the sidebar's #controlSchemeToggle is ONE <label> wrapping two
+        // hidden radios + two .toggle-label spans. Per HTML spec, clicking the
+        // label activates its FIRST labelable descendant (always "swipe"), so
+        // D-Pad could never be selected from the sidebar. Bind the spans
+        // directly and preventDefault to stop the label default, so each span
+        // sets its own scheme via updateControlScheme.
+        var schemeToggle = document.getElementById('controlSchemeToggle');
+        if (schemeToggle) {
+            var toggleLabels = schemeToggle.querySelectorAll('.toggle-label');
+            for (var j = 0; j < toggleLabels.length; j++) {
+                (function(label) {
+                    label.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        // The radio input immediately precedes its label span in the DOM.
+                        var input = label.previousElementSibling;
+                        if (input && (input.value === 'swipe' || input.value === 'dpad')) {
+                            updateControlScheme(input.value);
+                        }
+                    });
+                })(toggleLabels[j]);
+            }
         }
 
         var soundToggle = document.getElementById('soundToggle');
@@ -879,9 +907,11 @@
         // server's 3-2-1-Go as long as we start it at the first value.
         if (countdown !== lastCountdownValue) {
             if (countdown >= 1 && countdown <= 3 && !countdownClipPlayed) {
-                console.log('[Sound] Playing countdown clip (3-2-1-Go), started at:', countdown);
-                playCountdownSound(3);
-                countdownClipPlayed = true;
+                // Estimate when the server's countdown started on the client clock
+                // (first value N means it started ~ (3-N) seconds ago).
+                countdownStartClientTime = Date.now() - (3 - countdown) * 1000;
+                countdownPlayPending = true;
+                tryPlayCountdownClip();
             }
             lastCountdownValue = countdown;
         }
@@ -1476,6 +1506,12 @@
                     countdownBuffers[key] = audioBuffer;
                     console.log('[Sound] ' + key + ' loaded OK');
                     soundsLoading--;
+                    // A countdown may be pending while this buffer was still
+                    // decoding — play it now (aligned via offset) instead of
+                    // dropping it.
+                    if (key === 3 && countdownPlayPending) {
+                        tryPlayCountdownClip();
+                    }
                 })
                 .catch(function(e) { 
                     console.log('[Sound] ' + key + ' load error:', e); 
@@ -1484,50 +1520,68 @@
         });
     }
 
-    function playCountdownSound(num) {
-        if (!audioRunning()) {
-            // The AudioContext can unlock a fraction of a second AFTER the first
-            // countdown broadcast (user just tapped Ready). Retry a couple of
-            // times so the leading beep (usually 3) is not silently dropped.
-            if ((countdownRetries[num] || 0) < 3) {
-                countdownRetries[num] = (countdownRetries[num] || 0) + 1;
-                var retryNum = num;
-                setTimeout(function() {
-                    playCountdownSound(retryNum);
-                }, 180);
-            } else {
-                console.log('[Sound] playCountdownClip skipped (not running)');
-            }
+    // BUG 1 fix: instead of playing the countdown clip from the start (which
+    // drifts from the visual 3-2-1 when the AudioContext unlocks late), compute
+    // an offset from the countdown-start estimate and start the clip mid-way so
+    // its internal beeps (0s="3", 1s="2", 2s="1", 3s="Go") align with the
+    // server's real-time countdown. Also never silently drop the sound: keep
+    // retrying (without marking it played) until the audio is ready.
+    function tryPlayCountdownClip() {
+        if (!countdownPlayPending) return;
+        // Cancel if the countdown has already ended (value dropped below 1).
+        // NOTE: check the CURRENT broadcast value (module `countdown`, set from
+        // data.countdown at the top of onServerState) rather than
+        // lastCountdownValue — on the first broadcast of a round,
+        // lastCountdownValue still holds the pre-countdown value (e.g. -1), so
+        // checking it here would cancel the very first play attempt and drop
+        // the "3" beep. `countdown` is only non-negative while the server is
+        // still broadcasting a 3/2/1, which is exactly the cancel condition.
+        if (!(countdown >= 1 && countdown <= 3)) {
+            countdownPlayPending = false;
             return;
         }
-        
-        var buffer = countdownBuffers[num];
-        if (!buffer) { console.log('[Sound] No buffer for:', num, '(loading:', soundsLoading + ')'); return; }
-        
-        // Prevent double-play within 500ms (safety net for server double-broadcast)
+        // Compute clip offset so beeps align with the server countdown timeline.
+        var offset = (Date.now() - countdownStartClientTime) / 1000;
+        if (offset < 0) offset = 0;
+        if (offset > 2.9) offset = 2.9;
+        var buffer = countdownBuffers[3];
+        if (audioRunning() && buffer) {
+            playCountdownClip(offset);
+            countdownClipPlayed = true;
+            countdownPlayPending = false;
+        } else {
+            // Audio not ready yet (context unlocking or buffer still decoding):
+            // retry soon; DO NOT mark as played so the sound is not dropped.
+            setTimeout(tryPlayCountdownClip, 150);
+        }
+    }
+
+    function playCountdownClip(offset) {
+        var buffer = countdownBuffers[3];
+        if (!buffer) return;
+        // Keep the existing 500ms per-sound + 300ms global cooldown guards.
         var now = Date.now();
-        if (now - (lastPlayTime[num] || 0) < 500) {
-            console.log('[Sound] Skipping', num, '- played too recently (per-sound)');
+        if (now - (lastPlayTime[3] || 0) < 500) {
+            console.log('[Sound] Skipping countdown clip - played too recently (per-sound)');
             return;
         }
         // Global cooldown: prevent ANY countdown sound within 300ms of previous
         if (now - lastCountdownPlayTime < 300) {
-            console.log('[Sound] Skipping', num, '- global countdown cooldown');
+            console.log('[Sound] Skipping countdown clip - global countdown cooldown');
             return;
         }
-        
         try {
-            console.log('[Sound] Playing countdown:', num);
+            console.log('[Sound] Playing countdown clip at offset:', offset);
             var source = audioCtx.createBufferSource();
             var gain = audioCtx.createGain();
             source.buffer = buffer;
-            gain.gain.value = (num === 'go') ? 0.6 : 0.5;
+            gain.gain.value = 0.5;
             source.connect(gain);
             gain.connect(audioCtx.destination);
-            source.start(0);
-            lastPlayTime[num] = now;
+            source.start(0, offset);
+            lastPlayTime[3] = now;
             lastCountdownPlayTime = now;
-        } catch (e) { console.log('[Sound] Error playing', num, ':', e); }
+        } catch (e) { console.log('[Sound] Error playing countdown clip:', e); }
     }
 
     function playGameOverSound() {
@@ -1556,7 +1610,7 @@
         lastCountdownValue = -1;
         lastPlayTime = { 3: 0, 2: 0, 1: 0 };
         lastCountdownPlayTime = 0;
-        countdownRetries = { 3: 0, 2: 0, 1: 0 };
+        countdownPlayPending = false;
         wasGameOver = false;
     }
 

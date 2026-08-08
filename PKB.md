@@ -503,6 +503,14 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 - Docker container run pending — virtualization disabled in BIOS (WSL2/Docker Desktop not started)
 - Git: `main`; latest commit 0ab74eb (Phase 0 + Phase 1 scaffold + docs)
 
+### 17.3 Recent Fixes (2026-08-08)
+
+1. **game.js -- Countdown Audio Sync**: Computed real-time client-to-server time offset to align "3-2-1-Go" countdown clip play start with server ticks, resolving audio-visual drift when the AudioContext unlocks late.
+2. **game.js -- Sidebar Control Scheme Toggle**: Bound direct click event handlers on the toggle label spans and applied `preventDefault()` to bypass default HTML label radio selection issues, allowing D-Pad to be selected successfully.
+3. **style.css -- Mobile Header Overlap**: Restructured mobile header into a responsive 2-row layout (`min-height: 74px`) and increased `.game-wrapper` top offset to `74px` to completely eliminate canvas overlapping.
+4. **game.jsp & style.css -- Desktop Settings Polish**: Added `.control-scheme-group` class and hid the touch control settings on desktop resolutions (`@media (min-width: 1025px) { .control-scheme-group { display: none !important; } }`).
+5. **AdvancedBotManager.java -- Bot Food Reachability**: Swapped Manhattan distance checks for target food selection with BFS path distance (`bfsDist`) through free cells. Unreachable food pocketed behind walls/bodies yields `-1` and is skipped, preventing bots from orbiting deadlocks.
+
 ---
 
 ## 18. Document Map
