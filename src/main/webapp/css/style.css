@@ -7,6 +7,16 @@
     box-sizing: border-box;
 }
 
+/* Keyboard navigation: visible focus ring on every focusable element.
+   Inputs keep their existing :focus box-shadow ring (their base rule
+   uses outline: none with higher specificity), buttons/links get a
+   consistent accent outline here. */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
 :root {
     --bg: #0d1021;
     --bg-2: #1a1a2e;
@@ -26,7 +36,7 @@
     --header-h: 64px;
     --dpad-h: 0px;
     --safe-bottom: env(safe-area-inset-bottom);
-    --font: 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font: 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, 'Noto Sans Devanagari', 'Mukta', sans-serif;
     --mono: 'Cascadia Mono', Consolas, 'Courier New', monospace;
 }
 
@@ -42,6 +52,13 @@ body {
     background-attachment: fixed;
     overflow: auto; /* lobby page scrolls normally */
     -webkit-tap-highlight-color: transparent;
+}
+
+/* Nepali (Devanagari) — disable letter-spacing that can distort glyphs */
+html[lang="ne"] body,
+html[lang="ne"] .game-title,
+html[lang="ne"] .section-title {
+    letter-spacing: normal;
 }
 
 /* Subtle animated neon glow behind content */
@@ -143,6 +160,42 @@ body.game-page {
 
 .icon-btn:hover { background: rgba(15, 52, 96, 0.85); border-color: var(--secondary); }
 .icon-btn:active { transform: scale(0.92); }
+
+/* Language toggle button (index.jsp / profile.jsp lobby, before h1) */
+.lang-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    width: auto;
+}
+
+.lang-toggle:hover { background: var(--card-2); border-color: var(--accent); }
+.lang-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+#langToggleLabel { font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }
+
+/* Visually hidden but available to screen readers (game.js #sr-status) */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
 
 /* ============================================================
    3. LOBBY (index.jsp)
@@ -2057,4 +2110,15 @@ html.swipe-mode .touch-dpad { display: none !important; }
     html.swipe-mode .touch-swipe-area {
         display: none !important;
     }
+}
+
+/* Language toggle inside headers (game.jsp desktop + mobile):
+   .icon-btn is fixed-width (44px desktop / 32px mobile); the labeled
+   toggle needs auto width so the 🌐 + EN label is never clipped.
+   Placed after the media queries so width:auto also wins over
+   .mobile-header .icon-btn (same specificity, later source order). */
+.icon-btn.lang-toggle {
+    width: auto;
+    padding: 0 10px;
+    gap: 4px;
 }

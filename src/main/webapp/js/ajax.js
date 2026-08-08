@@ -27,15 +27,15 @@ const Ajax = {
                     try {
                         callback(JSON.parse(xhr.responseText));
                     } catch (e) {
-                        callback({ success: false, error: 'Invalid response' });
+                        callback({ success: false, error: I18n.t('invalidResponse') });
                     }
                 } else {
-                    callback({ success: false, error: 'Server error (' + xhr.status + ')' });
+                    callback({ success: false, error: I18n.t('serverError') + ' (' + xhr.status + ')' });
                 }
             }
         };
         xhr.onerror = function() {
-            callback({ success: false, error: 'Network error' });
+            callback({ success: false, error: I18n.t('networkError') });
         };
         xhr.send();
     },
@@ -52,15 +52,15 @@ const Ajax = {
                     try {
                         callback(JSON.parse(xhr.responseText));
                     } catch (e) {
-                        callback({ success: false, error: 'Invalid response' });
+                        callback({ success: false, error: I18n.t('invalidResponse') });
                     }
                 } else {
-                    callback({ success: false, error: 'Server error (' + xhr.status + ')' });
+                    callback({ success: false, error: I18n.t('serverError') + ' (' + xhr.status + ')' });
                 }
             }
         };
         xhr.onerror = function() {
-            callback({ success: false, error: 'Network error' });
+            callback({ success: false, error: I18n.t('networkError') });
         };
         xhr.send(JSON.stringify(data));
     }

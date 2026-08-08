@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Game API Docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #0d1021; }
+    .topbar { background-color: #0d1021 !important; border-bottom: 1px solid #1c2140; }
+    .topbar-wrapper .link { color: #e94560 !important; font-weight: 700; }
+    .swagger-ui .info .title { color: #e94560; }
+    .swagger-ui .info .description, .swagger-ui .info li, .swagger-ui .info p, .swagger-ui .info table { color: #c7cbe0; }
+    .swagger-ui .scheme-container { background: #141833; box-shadow: 0 1px 2px 0 rgba(0,0,0,.4); }
+    .swagger-ui .opblock-tag, .swagger-ui .opblock .opblock-summary-operation-id, .swagger-ui .opblock .opblock-summary-path,
+    .swagger-ui .opblock .opblock-summary-description, .swagger-ui .model-title, .swagger-ui .models-control, .swagger-ui .opblock-description-wrapper p { color: #c7cbe0; }
+    .swagger-ui .opblock { background: #141833; border-color: #1c2140; }
+    .swagger-ui .opblock .opblock-summary { border-bottom: 1px solid #1c2140; }
+    .swagger-ui .opblock .opblock-section-header { background: #0d1021; box-shadow: none; border-bottom: 1px solid #1c2140; }
+    .swagger-ui .opblock .opblock-section-header h4, .swagger-ui .tab li, .swagger-ui .response-col_status, .swagger-ui table thead th { color: #c7cbe0; }
+    .swagger-ui .btn.authorize, .swagger-ui .btn.execute { background: #e94560; border-color: #e94560; }
+    .swagger-ui .btn.authorize:hover, .swagger-ui .btn.execute:hover { background: #ff5c77; border-color: #ff5c77; }
+    .swagger-ui select, .swagger-ui .parameter__name, .swagger-ui .parameter__in, .swagger-ui .model-box, .swagger-ui .models { color: #c7cbe0; }
+    .swagger-ui .model-title, .swagger-ui section.models { background: #141833; }
+    .swagger-ui section.models .model-container { background: #0d1021; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: "openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset]
+      });
+    };
+  </script>
+</body>
+</html>

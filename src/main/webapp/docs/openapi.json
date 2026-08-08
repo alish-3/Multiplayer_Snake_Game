@@ -1,0 +1,1041 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Multiplayer Snake Game API",
+    "version": "1.0.0",
+    "description": "REST + WebSocket API for the Multiplayer Snake Game. The game supports real-time multiplayer snake gameplay over WebSocket (game state is broadcast as GameState JSON on every tick), room management, leaderboards, profiles, and optional JWT remember-me tokens for session restoration.\n\nAll POST endpoints dispatch actions via the `action` field in the JSON request body. Business-rule failures are usually returned as HTTP 200 with `success: false` and an `error` message; HTTP 400/404 codes indicate malformed input or missing resources. Every /api/* endpoint is subject to token-bucket rate limiting per client (per IP or per player name) and may return HTTP 429 with a `Retry-After` header."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Registration, login, remember-me, score and stats endpoints (POST /api/auth)"
+    },
+    {
+      "name": "Rooms",
+      "description": "Room management: list, create, join, spectate (GET/POST /api/room)"
+    },
+    {
+      "name": "Game",
+      "description": "Game actions and state (GET/POST /api/game)"
+    },
+    {
+      "name": "Health",
+      "description": "Server health and diagnostics (GET /api/health)"
+    },
+    {
+      "name": "Leaderboard",
+      "description": "Top players by high score (GET /api/leaderboard)"
+    },
+    {
+      "name": "Profile",
+      "description": "Authenticated user profile management (GET/POST /api/profile)"
+    },
+    {
+      "name": "WebSocket",
+      "description": "Real-time gameplay WebSocket endpoints"
+    }
+  ],
+  "paths": {
+    "/api/auth": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Authentication actions (register, login, remember, saveScore, stats)",
+        "description": "The action is dispatched via the required `action` field in the JSON body. `login` with `remember: true` returns a JWT token that can later be exchanged via the `remember` action to restore the session. `saveScore` and `stats` require an authenticated HTTP session matching the supplied username.",
+        "operationId": "authAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/RegisterRequest" },
+                  { "$ref": "#/components/schemas/LoginRequest" },
+                  { "$ref": "#/components/schemas/RememberRequest" },
+                  { "$ref": "#/components/schemas/SaveScoreRequest" },
+                  { "$ref": "#/components/schemas/StatsRequest" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK. Successful actions return `success: true`; business errors return `success: false` with an `error` message.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing action, missing/empty username or password, invalid username pattern, or invalid score.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. register: max 3/min per IP; login: max 5/min per IP; remember: max 10/min per IP.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/room": {
+      "get": {
+        "tags": ["Rooms"],
+        "summary": "List open (non-playing) rooms",
+        "description": "Returns rooms that are not currently in a game, after cleaning up stale and empty rooms. Action is dispatched via the `action` query parameter.",
+        "operationId": "listRooms",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "required": true,
+            "description": "Operation to perform. Only `list` is supported for GET.",
+            "schema": {
+              "type": "string",
+              "enum": ["list"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. Room list (may be empty).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoomListResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - unknown action.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Rooms"],
+        "summary": "Room actions (create, join, spectate)",
+        "description": "The action is dispatched via the required `action` field in the JSON body. `create` also accepts optional custom room settings (grid size, tick rate, max players, food density, boost/golden food toggles) and bot mode options (`gameMode: \"bots\"`).",
+        "operationId": "roomAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/CreateRoomRequest" },
+                  { "$ref": "#/components/schemas/JoinRoomRequest" },
+                  { "$ref": "#/components/schemas/SpectateRequest" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK. `create` returns the new room code; `join`/`spectate` return the room code plus the room settings.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoomActionResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - invalid room code (must be 6 chars from A-Z2-9), invalid player/spectator name, or missing fields.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Room not found.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. create: max 3/10s per IP; join: max 5/10s per IP; spectate: max 10/10s per IP.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/game": {
+      "get": {
+        "tags": ["Game"],
+        "summary": "Get current game state for a room",
+        "description": "Returns the full GameState JSON for a room. Before a game is initialized, a waiting lobby state is returned (snakes list with `food: null`, `gameStarted: false`). Action is dispatched via the `action` query parameter.",
+        "operationId": "getGameState",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "required": true,
+            "description": "Operation to perform. Only `state` is supported for GET.",
+            "schema": {
+              "type": "string",
+              "enum": ["state"]
+            }
+          },
+          {
+            "name": "room",
+            "in": "query",
+            "required": true,
+            "description": "6-character room code (A-Z, 2-9).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z2-9]{6}$",
+              "example": "ABC234"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. Current game state (or lobby waiting state).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GameState" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - unknown action.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Room not found.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Game"],
+        "summary": "Game actions (join, move, boost, ready, leave)",
+        "description": "The action is dispatched via the required `action` field in the JSON body. `join` marks an existing room player as connected (the player must already exist in the room - see POST /api/room). `move` queues a new direction for the next tick; 180-degree reversals are rejected. `boost` toggles the hybrid boost (2x speed). `ready` marks the player ready; when all players are ready the game auto-starts.",
+        "operationId": "gameAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/GameJoinRequest" },
+                  { "$ref": "#/components/schemas/GameMoveRequest" },
+                  { "$ref": "#/components/schemas/GameBoostRequest" },
+                  { "$ref": "#/components/schemas/GameReadyRequest" },
+                  { "$ref": "#/components/schemas/GameLeaveRequest" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK. `success: true` on success; `success: false` with an `error` for business-rule failures (e.g. invalid direction, dead snake).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GameActionResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing/invalid room code, missing direction, or unknown action.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Room or player not found.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. move: max 10/100ms per player; boost: max 20/100ms per player; ready: max 5/s per player.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Server health and diagnostics",
+        "description": "Returns overall status, uptime, active rooms/connections/players, games in progress, database connectivity (password sanitized), and JVM heap memory usage.",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "OK. Health snapshot.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/leaderboard": {
+      "get": {
+        "tags": ["Leaderboard"],
+        "summary": "Top players leaderboard",
+        "description": "Returns a paginated leaderboard ordered by high score (descending).",
+        "operationId": "getLeaderboard",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number, 1-based. Default 1, minimum 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "example": 1
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "description": "Entries per page. Default 20, minimum 1, maximum 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. Leaderboard page with pagination metadata.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LeaderboardResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (max 10 requests per 10 seconds per IP).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile": {
+      "get": {
+        "tags": ["Profile"],
+        "summary": "Get the authenticated user's profile",
+        "description": "Returns the profile of the user in the current HTTP session. The session is created by registering or logging in; guests (unauthenticated) are rejected. A JWT from the auth `remember` action can be used to restore a session via the `remember` endpoint before calling this.",
+        "operationId": "getProfile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. Profile data.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ProfileResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated (no session, or guest session). The server currently returns this as HTTP 200 with `success: false` and `error: \"Not authenticated\"`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Profile"],
+        "summary": "Profile actions (changePassword, changeUsername, deleteAccount)",
+        "description": "The action is dispatched via the required `action` field in the JSON body. All actions require an authenticated (non-guest) HTTP session and the current password. `deleteAccount` additionally requires `confirmed: true` and invalidates the session on success.",
+        "operationId": "profileAction",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/ChangePasswordRequest" },
+                  { "$ref": "#/components/schemas/ChangeUsernameRequest" },
+                  { "$ref": "#/components/schemas/DeleteAccountRequest" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK. `changeUsername` also returns the new username.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ProfileActionResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing fields, mismatched/weak new password, invalid new username, or unknown action.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. The server currently returns this as HTTP 200 with `success: false` and `error: \"Not authenticated\"`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RateLimitError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/game/ws/{roomCode}/{playerName}": {
+      "get": {
+        "tags": ["WebSocket"],
+        "summary": "Real-time gameplay WebSocket endpoint",
+        "description": "WebSocket endpoint (wss:// when served over HTTPS) for live gameplay. The server immediately sends the current GameState (or lobby waiting state) on connection, then broadcasts the full GameState JSON to all connected clients on every game tick. A `reconnectToken` query parameter can be supplied to reconnect a dropped connection within the 30-second reconnect window.\n\nClient -> Server messages (JSON):\n- `{\"action\":\"move\",\"direction\":\"UP\"|\"DOWN\"|\"LEFT\"|\"RIGHT\"}` - queue a direction for the next tick (no 180-degree reversals)\n- `{\"action\":\"boost\",\"boost\":true|false}` - toggle hybrid boost (2x speed)\n- `{\"action\":\"ready\"}` - mark player ready; when all are ready the game starts\n- `{\"action\":\"ping\",\"t\":<clientTimestampMs>}` - keep-alive\n\nServer -> Client messages (JSON):\n- GameState (broadcast on every tick and on join/ready changes)\n- `{\"action\":\"pong\",\"t\":<timestampMs>}` - reply to ping",
+        "operationId": "gameWebSocket",
+        "parameters": [
+          {
+            "name": "roomCode",
+            "in": "path",
+            "required": true,
+            "description": "6-character room code (A-Z, 2-9).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z2-9]{6}$",
+              "example": "ABC234"
+            }
+          },
+          {
+            "name": "playerName",
+            "in": "path",
+            "required": true,
+            "description": "Player name (must already be a member of the room).",
+            "schema": {
+              "type": "string",
+              "example": "alice"
+            }
+          },
+          {
+            "name": "reconnectToken",
+            "in": "query",
+            "required": false,
+            "description": "Optional token returned after a disconnect to restore a session within 30 seconds.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols - WebSocket upgrade accepted. The server sends GameState immediately on open."
+          },
+          "400": {
+            "description": "Bad request - room or player not found, room full, or game in progress (the server closes the socket with a close reason)."
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/api/game/ws/{roomCode}/spectator/{spectatorName}": {
+      "get": {
+        "tags": ["WebSocket"],
+        "summary": "Read-only spectator WebSocket endpoint",
+        "description": "WebSocket endpoint for read-only spectating. Spectators do not count toward the room's player limit and cannot move/ready/boost. The server sends the current GameState (or lobby waiting state) on connection and broadcasts GameState on every tick. A `reconnectToken` query parameter can be supplied to reconnect within the 30-second window.\n\nClient -> Server messages (JSON):\n- `{\"action\":\"ping\",\"t\":<clientTimestampMs>}` - keep-alive (move/ready/boost are silently ignored)\n\nServer -> Client messages (JSON):\n- GameState (broadcast on every tick)\n- `{\"action\":\"pong\",\"t\":<timestampMs>}` - reply to ping",
+        "operationId": "spectatorWebSocket",
+        "parameters": [
+          {
+            "name": "roomCode",
+            "in": "path",
+            "required": true,
+            "description": "6-character room code (A-Z, 2-9).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z2-9]{6}$",
+              "example": "ABC234"
+            }
+          },
+          {
+            "name": "spectatorName",
+            "in": "path",
+            "required": true,
+            "description": "Spectator display name (must not collide with a player or another spectator in the room).",
+            "schema": {
+              "type": "string",
+              "example": "viewer1"
+            }
+          },
+          {
+            "name": "reconnectToken",
+            "in": "query",
+            "required": false,
+            "description": "Optional token returned after a disconnect to restore the spectator session within 30 seconds.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols - WebSocket upgrade accepted. The server sends GameState immediately on open."
+          },
+          "400": {
+            "description": "Bad request - room not found or name already taken (the server closes the socket with a close reason)."
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Optional JWT remember-me token issued by the auth `login` action (when `remember: true`) and exchanged via the `remember` action. Sessions are otherwise cookie/HTTP-session based."
+      }
+    },
+    "schemas": {
+      "Direction": {
+        "type": "string",
+        "enum": ["UP", "DOWN", "LEFT", "RIGHT"],
+        "description": "Compass direction. 180-degree reversals are rejected."
+      },
+      "Point": {
+        "type": "object",
+        "description": "Grid cell coordinates (0-based).",
+        "properties": {
+          "x": { "type": "integer", "description": "Column (0 = left edge, max = gridSize - 1)." },
+          "y": { "type": "integer", "description": "Row (0 = top edge, max = gridSize - 1)." }
+        }
+      },
+      "Food": {
+        "type": "object",
+        "description": "A food pellet on the board.",
+        "properties": {
+          "x": { "type": "integer" },
+          "y": { "type": "integer" },
+          "value": {
+            "type": "integer",
+            "description": "Growth/score value. NORMAL = 1, GOLDEN = 3.",
+            "example": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": ["NORMAL", "GOLDEN"],
+            "description": "Golden food spawns from dead snake segments and randomly at spawn (15%)."
+          }
+        }
+      },
+      "Snake": {
+        "type": "object",
+        "description": "A snake (human player or bot) in a room.",
+        "properties": {
+          "name": { "type": "string", "description": "Player name (unique within the room)." },
+          "color": { "type": "string", "description": "Hex color, e.g. \"#e94560\".", "example": "#e94560" },
+          "segments": {
+            "type": "array",
+            "description": "Body segments, head first.",
+            "items": { "$ref": "#/components/schemas/Point" }
+          },
+          "direction": { "$ref": "#/components/schemas/Direction" },
+          "nextDirection": { "$ref": "#/components/schemas/Direction" },
+          "score": { "type": "integer", "description": "Score equals segment count (length)." },
+          "alive": { "type": "boolean" },
+          "ready": { "type": "boolean", "description": "True once the player has pressed ready." },
+          "bot": { "type": "boolean", "description": "True for server-side AI bots." },
+          "boosting": { "type": "boolean", "description": "Hybrid boost active (2x speed, sheds a tail segment as NORMAL food every 2 ticks, auto-off at <= 5 segments)." },
+          "botDifficulty": {
+            "type": "string",
+            "enum": ["easy", "normal", "hard", "impossible"],
+            "description": "Bot AI difficulty."
+          },
+          "botStrategy": { "type": "string", "description": "Bot personality strategy, e.g. \"balanced\".", "example": "balanced" },
+          "speedMultiplier": { "type": "number", "format": "float", "description": "Movement speed multiplier (2.0x while boosting)." },
+          "growthPoints": { "type": "integer", "description": "Pending growth counter (one segment per point)." },
+          "lastActivity": { "type": "integer", "format": "int64", "description": "Epoch millis of last player activity." },
+          "disconnectedSince": { "type": "integer", "format": "int64", "description": "Epoch millis when disconnection was flagged; 0 if connected." },
+          "reconnectToken": { "type": "string", "nullable": true, "description": "Token used to reconnect after a dropped WebSocket." },
+          "lastDisconnectTime": { "type": "integer", "format": "int64", "nullable": true, "description": "Epoch millis of the last disconnect." }
+        }
+      },
+      "GameState": {
+        "type": "object",
+        "description": "Full game state broadcast to clients. Before a game starts, the lobby waiting state omits `foods`/`boostCoins` and uses `food: null`, `countdown: -1` or `countdown: 0`.",
+        "properties": {
+          "snakes": {
+            "type": "array",
+            "description": "All snakes in the room (alive and dead).",
+            "items": { "$ref": "#/components/schemas/Snake" }
+          },
+          "foods": {
+            "type": "array",
+            "nullable": true,
+            "description": "Food pellets on the board. Null in the pre-game lobby state.",
+            "items": { "$ref": "#/components/schemas/Food" }
+          },
+          "food": {
+            "nullable": true,
+            "description": "Legacy alias used by the lobby waiting state (`food: null`).",
+            "allOf": [{ "$ref": "#/components/schemas/Food" }]
+          },
+          "gridSize": { "type": "integer", "description": "Board size in cells (default 30, range 15-50)." },
+          "gameOver": { "type": "boolean" },
+          "gameStarted": { "type": "boolean" },
+          "tick": { "type": "integer", "description": "Server tick counter (150ms per tick by default)." },
+          "countdown": { "type": "integer", "description": "Seconds remaining before start (3, 2, 1); 0 while playing; -1 in lobby." },
+          "roundDurationMs": { "type": "integer", "format": "int64", "description": "Elapsed round time in milliseconds." },
+          "boostCoins": { "type": "integer", "description": "Global boost currency (starts at 20, +10 every 5s, +50 per score milestone 100/500/1000)." },
+          "snakeSpeedBoost": { "type": "boolean", "description": "Legacy field, unused." },
+          "speedBoostExpireTime": { "type": "integer", "format": "int64", "description": "Legacy field, unused." }
+        }
+      },
+      "Room": {
+        "type": "object",
+        "description": "Public summary of a lobby room (from GET /api/room?action=list).",
+        "properties": {
+          "code": { "type": "string", "description": "6-character room code (A-Z, 2-9).", "example": "ABC234" },
+          "playerCount": { "type": "integer", "description": "Number of players joined." },
+          "spectatorCount": { "type": "integer", "description": "Number of spectators watching." },
+          "maxPlayers": { "type": "integer", "description": "Room capacity (default 4, range 2-8)." },
+          "gridSize": { "type": "integer", "description": "Board size in cells (default 30, range 15-50)." },
+          "tickRateMs": { "type": "integer", "description": "Game tick interval in ms (default 150, range 50-500)." },
+          "foodDensity": { "type": "number", "format": "double", "description": "Food spawn density multiplier (default 1.0, range 0.5-3.0)." },
+          "enableBoost": { "type": "boolean", "description": "Whether hybrid boost is enabled." },
+          "enableGoldenFood": { "type": "boolean", "description": "Whether golden food is enabled." },
+          "gameMode": { "type": "string", "enum": ["friends", "bots"], "description": "\"friends\" for human-only, \"bots\" to fill with AI." },
+          "botCount": { "type": "integer", "description": "Number of bots to fill (1-3 in bots mode, 0 otherwise)." },
+          "botDifficulty": { "type": "string", "enum": ["easy", "normal", "hard", "impossible"], "description": "Bot AI difficulty." }
+        }
+      },
+      "RoomListResponse": {
+        "type": "object",
+        "properties": {
+          "rooms": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Room" }
+          }
+        }
+      },
+      "RoomActionResponse": {
+        "type": "object",
+        "description": "Response for POST /api/room. `create` returns code + success; `join`/`spectate` also return the room settings.",
+        "properties": {
+          "success": { "type": "boolean" },
+          "roomCode": { "type": "string", "description": "6-character room code.", "example": "ABC234" },
+          "gridSize": { "type": "integer" },
+          "tickRateMs": { "type": "integer" },
+          "maxPlayers": { "type": "integer" },
+          "foodDensity": { "type": "number" },
+          "enableBoost": { "type": "boolean" },
+          "enableGoldenFood": { "type": "boolean" },
+          "gameMode": { "type": "string" },
+          "botCount": { "type": "integer" },
+          "botDifficulty": { "type": "string" },
+          "error": { "type": "string", "description": "Present on failure (with success: false)." }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "description": "Response for POST /api/auth actions.",
+        "properties": {
+          "success": { "type": "boolean" },
+          "username": { "type": "string", "description": "Present for register/login/remember." },
+          "token": { "type": "string", "description": "JWT remember-me token, present for login with remember: true." },
+          "stats": {
+            "$ref": "#/components/schemas/Stats",
+            "description": "Present for the stats action."
+          },
+          "error": { "type": "string", "description": "Present on failure (with success: false)." }
+        }
+      },
+      "Stats": {
+        "type": "object",
+        "description": "Aggregate player statistics.",
+        "properties": {
+          "totalGames": { "type": "integer" },
+          "totalScore": { "type": "integer" },
+          "highScore": { "type": "integer" }
+        }
+      },
+      "GameActionResponse": {
+        "type": "object",
+        "description": "Response for POST /api/game actions.",
+        "properties": {
+          "success": { "type": "boolean" },
+          "error": { "type": "string", "description": "Present on failure (with success: false)." }
+        }
+      },
+      "LeaderboardEntry": {
+        "type": "object",
+        "description": "One ranked player on the leaderboard.",
+        "properties": {
+          "rank": { "type": "integer", "description": "1-based rank for this page." },
+          "username": { "type": "string" },
+          "highScore": { "type": "integer" },
+          "totalScore": { "type": "integer" },
+          "totalGames": { "type": "integer" },
+          "createdAt": { "type": "string", "description": "Account creation timestamp." }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer" },
+          "size": { "type": "integer" },
+          "totalPages": { "type": "integer" },
+          "totalPlayers": { "type": "integer" }
+        }
+      },
+      "LeaderboardResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "leaderboard": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LeaderboardEntry" }
+          },
+          "pagination": { "$ref": "#/components/schemas/Pagination" }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "description": "Server health snapshot (GET /api/health).",
+        "properties": {
+          "status": { "type": "string", "enum": ["UP", "DOWN"], "description": "Overall health (DOWN when the database is unreachable)." },
+          "activeRooms": { "type": "integer" },
+          "activeConnections": { "type": "integer", "description": "Active player WebSocket connections." },
+          "totalPlayers": { "type": "integer", "description": "Players across all rooms (including bots)." },
+          "gamesInProgress": { "type": "integer" },
+          "uptimeMs": { "type": "integer", "format": "int64" },
+          "uptimeHuman": { "type": "string", "example": "1d 2h 3m 4s" },
+          "database": {
+            "type": "object",
+            "properties": {
+              "connected": { "type": "boolean" },
+              "url": { "type": "string", "description": "JDBC URL with password sanitized." }
+            }
+          },
+          "memory": {
+            "type": "object",
+            "properties": {
+              "heapUsedBytes": { "type": "integer", "format": "int64" },
+              "heapMaxBytes": { "type": "integer", "format": "int64" },
+              "heapUsedMb": { "type": "integer" },
+              "heapMaxMb": { "type": "integer" },
+              "heapUsagePercent": { "type": "integer" }
+            }
+          },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Profile": {
+        "type": "object",
+        "description": "Authenticated user profile.",
+        "properties": {
+          "username": { "type": "string" },
+          "createdAt": { "type": "string", "nullable": true, "description": "Account creation timestamp." },
+          "lastLogin": { "type": "string", "nullable": true, "description": "Last login timestamp." },
+          "totalGames": { "type": "integer" },
+          "totalScore": { "type": "integer" },
+          "highScore": { "type": "integer" }
+        }
+      },
+      "ProfileResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "profile": { "$ref": "#/components/schemas/Profile" }
+        }
+      },
+      "ProfileActionResponse": {
+        "type": "object",
+        "description": "Response for POST /api/profile actions.",
+        "properties": {
+          "success": { "type": "boolean" },
+          "username": { "type": "string", "description": "Present after changeUsername (the new username)." },
+          "error": { "type": "string", "description": "Present on failure (with success: false)." }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "Generic error envelope.",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": { "type": "string", "description": "Human-readable error message." }
+        }
+      },
+      "RateLimitError": {
+        "type": "object",
+        "description": "HTTP 429 response. Includes a Retry-After header (seconds).",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": { "type": "string", "description": "Which rate limit was exceeded." },
+          "retryAfterMs": { "type": "integer", "format": "int64", "description": "Milliseconds until the client can retry." }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["action", "username", "password"],
+        "properties": {
+          "action": { "type": "string", "enum": ["register"], "description": "Action to dispatch." },
+          "username": { "type": "string", "pattern": "^[A-Za-z0-9_-]{3,20}$", "description": "3-20 chars: letters, numbers, underscore, hyphen." },
+          "password": { "type": "string", "minLength": 4, "maxLength": 100, "description": "4-100 characters." }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["action", "username", "password"],
+        "properties": {
+          "action": { "type": "string", "enum": ["login"] },
+          "username": { "type": "string", "maxLength": 50 },
+          "password": { "type": "string" },
+          "remember": { "type": "boolean", "default": false, "description": "When true, returns a JWT remember-me token." }
+        }
+      },
+      "RememberRequest": {
+        "type": "object",
+        "required": ["action", "token"],
+        "properties": {
+          "action": { "type": "string", "enum": ["remember"] },
+          "token": { "type": "string", "description": "JWT remember-me token from login with remember: true." }
+        }
+      },
+      "SaveScoreRequest": {
+        "type": "object",
+        "required": ["action", "username", "score"],
+        "properties": {
+          "action": { "type": "string", "enum": ["saveScore"] },
+          "username": { "type": "string", "description": "Must match the authenticated session user." },
+          "score": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "StatsRequest": {
+        "type": "object",
+        "required": ["action", "username"],
+        "properties": {
+          "action": { "type": "string", "enum": ["stats"] },
+          "username": { "type": "string", "description": "Must match the authenticated session user." }
+        }
+      },
+      "CreateRoomRequest": {
+        "type": "object",
+        "required": ["action", "playerName"],
+        "properties": {
+          "action": { "type": "string", "enum": ["create"] },
+          "playerName": { "type": "string", "pattern": "^[A-Za-z0-9 _-]{1,20}$", "description": "1-20 chars: alphanumeric, spaces, underscores, hyphens." },
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "description": "Optional snake color (defaults to #e94560)." },
+          "gameMode": { "type": "string", "enum": ["friends", "bots"], "default": "friends" },
+          "botCount": { "type": "integer", "minimum": 1, "maximum": 3, "description": "Bots to add when gameMode is \"bots\"." },
+          "botDifficulty": { "type": "string", "enum": ["easy", "normal", "hard", "impossible"], "default": "normal" },
+          "gridSize": { "type": "integer", "minimum": 15, "maximum": 50, "default": 30 },
+          "tickRateMs": { "type": "integer", "minimum": 50, "maximum": 500, "default": 150 },
+          "maxPlayers": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4 },
+          "foodDensity": { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1 },
+          "enableBoost": { "type": "boolean", "default": true },
+          "enableGoldenFood": { "type": "boolean", "default": true }
+        }
+      },
+      "JoinRoomRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "playerName"],
+        "properties": {
+          "action": { "type": "string", "enum": ["join"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$", "description": "6 chars: A-Z and 2-9." },
+          "playerName": { "type": "string", "pattern": "^[A-Za-z0-9 _-]{1,20}$" },
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+        }
+      },
+      "SpectateRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "spectatorName"],
+        "properties": {
+          "action": { "type": "string", "enum": ["spectate"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$" },
+          "spectatorName": { "type": "string", "pattern": "^[A-Za-z0-9 _-]{1,20}$", "description": "Must not collide with a player or another spectator." }
+        }
+      },
+      "GameJoinRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "playerName"],
+        "properties": {
+          "action": { "type": "string", "enum": ["join"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$" },
+          "playerName": { "type": "string", "description": "Player already present in the room." }
+        }
+      },
+      "GameMoveRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "playerName", "direction"],
+        "properties": {
+          "action": { "type": "string", "enum": ["move"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$" },
+          "playerName": { "type": "string" },
+          "direction": { "$ref": "#/components/schemas/Direction" }
+        }
+      },
+      "GameBoostRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "playerName", "boost"],
+        "properties": {
+          "action": { "type": "string", "enum": ["boost"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$" },
+          "playerName": { "type": "string" },
+          "boost": { "type": "boolean", "description": "True to enable hybrid boost, false to disable." }
+        }
+      },
+      "GameReadyRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "playerName"],
+        "properties": {
+          "action": { "type": "string", "enum": ["ready"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$" },
+          "playerName": { "type": "string" }
+        }
+      },
+      "GameLeaveRequest": {
+        "type": "object",
+        "required": ["action", "roomCode", "playerName"],
+        "properties": {
+          "action": { "type": "string", "enum": ["leave"] },
+          "roomCode": { "type": "string", "pattern": "^[A-Z2-9]{6}$" },
+          "playerName": { "type": "string" }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": ["action", "currentPassword", "newPassword", "confirmPassword"],
+        "properties": {
+          "action": { "type": "string", "enum": ["changePassword"] },
+          "currentPassword": { "type": "string" },
+          "newPassword": { "type": "string", "minLength": 4, "maxLength": 100 },
+          "confirmPassword": { "type": "string", "description": "Must match newPassword." }
+        }
+      },
+      "ChangeUsernameRequest": {
+        "type": "object",
+        "required": ["action", "newUsername", "currentPassword"],
+        "properties": {
+          "action": { "type": "string", "enum": ["changeUsername"] },
+          "newUsername": { "type": "string", "pattern": "^[A-Za-z0-9_-]{3,20}$", "description": "3-20 chars: letters, numbers, underscore, hyphen." },
+          "currentPassword": { "type": "string" }
+        }
+      },
+      "DeleteAccountRequest": {
+        "type": "object",
+        "required": ["action", "currentPassword", "confirmed"],
+        "properties": {
+          "action": { "type": "string", "enum": ["deleteAccount"] },
+          "currentPassword": { "type": "string" },
+          "confirmed": { "type": "boolean", "description": "Must be true; the session is invalidated on success." }
+        }
+      }
+    }
+  }
+}

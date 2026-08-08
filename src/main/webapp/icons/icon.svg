@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Rounded-square background (safe zone = central 80%) -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="#0d1021" stroke="#1a1a2e" stroke-width="8"/>
+  <!-- Snake body segments (tail on left, head on right) -->
+  <rect x="76" y="214" width="76" height="84" rx="38" fill="#16a34a"/>
+  <rect x="152" y="204" width="82" height="104" rx="41" fill="#16a34a"/>
+  <rect x="234" y="194" width="84" height="124" rx="42" fill="#16a34a"/>
+  <!-- Head (darker green) -->
+  <rect x="318" y="184" width="98" height="144" rx="49" fill="#15803d"/>
+  <!-- Red forked tongue -->
+  <rect x="416" y="245" width="24" height="22" rx="11" fill="#ef4444"/>
+  <polygon points="440,248 458,243 440,256" fill="#ef4444"/>
+  <polygon points="440,264 458,270 440,256" fill="#ef4444"/>
+  <!-- Eye -->
+  <circle cx="394" cy="222" r="16" fill="#ffffff"/>
+  <circle cx="395" cy="223" r="7" fill="#0d1021"/>
+</svg>

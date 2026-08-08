@@ -42,6 +42,12 @@ build/
 jetty-run.log
 jetty.log
 
+# JSP compile scratch (Jetty writes compiled JSPs to a root-level jsp/ dir)
+/jsp/
+
+# Runtime log output (GameLogger)
+/logs/
+
 # Browser test tooling (Playwright MCP)
 .playwright-mcp/
 
@@ -92,7 +98,7 @@ verify-*.png
 screenshot-*.txt
 
 # Duplicate root js folder (use src/main/webapp/js/ instead)
-js/
+/js/
 
 # Local env file for docker-compose (never commit real secrets)
 .env

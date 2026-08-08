@@ -201,15 +201,13 @@ public class GameEngine {
 
             if (eatenFood != null) {
                 foods.remove(eatenFood);
-                // Hybrid rule: food value = length gained (score == length)
-                snake.setGrowthPoints(snake.getGrowthPoints() + eatenFood.getValue());
                 // Log food consumption
                 GameLogger.foodConsumed(room.getCode(), snake.getName(), eatenFood.getType(), eatenFood.getValue(), 
                     eatenFood.getX(), eatenFood.getY(), snake.getSegments().size());
-            }
-
-            if (snake.getGrowthPoints() > 0) {
-                snake.setGrowthPoints(snake.getGrowthPoints() - 1);
+                // Gated growth (replaces legacy growthPoints += value + 1-per-tick drain):
+                // score += food value; growth gated to 1 segment per threshold point (1 below/at 100,
+                // every 4th accumulated point above). Pending points carry over via growthPoints.
+                applyGatedGrowth(snake, eatenFood.getValue());
             } else {
                 snake.getSegments().remove(snake.getSegments().size() - 1);
             }
@@ -291,11 +289,6 @@ public class GameEngine {
         // the slither.io way: the killer eats the mass, no score handouts.
 
         state.setFoods(foods);
-
-        // Hybrid rule: score == length (number of segments), like slither.io mass
-        for (Snake snake : snakes) {
-            snake.setScore(snake.getSegments().size());
-        }
 
         // Check if game over (all dead or only one alive in multiplayer)
         long elapsedMs = 0;

@@ -193,6 +193,7 @@ docker compose up --build     # → http://localhost:8080
 ```
 
 Then open `http://localhost:8080/` (Jetty or Docker, context root `/`).
+Swagger API docs: http://localhost:8080/docs/  (OpenAPI spec: docs/openapi.json)
 
 ### Share it live (ngrok)
 
@@ -434,13 +435,17 @@ Server-side bots (`AdvancedBotManager`) use flood-fill survival + opponent-aware
 - [x] **Phase 2 — Hardening & Observability** — Health endpoint, structured logging, rate limiting, security headers/CORS, input validation, graceful shutdown, **WebSocket reconnection resilience (grace period + token-based state sync)**
 - [x] **Phase 3 — Depth & Retention** — Custom room settings, spectator mode, **reconnection UX**, global leaderboard, profile management
 
-### 🎯 Next Milestones (Phase 4 — Polish)
+### ✅ Phase 4 — Polish, PWA & i18n (2026-08-08)
 
-- [ ] **PWA / Mobile Polish** — Installable app, offline support, home screen install
-- [ ] **Accessibility** — Keyboard navigation, screen reader support, ARIA labels
-- [ ] **Internationalization (i18n)** — Multi-language support
-- [ ] **OpenAPI/Swagger** — Auto-generated REST API documentation
-- [ ] **Gated Growth Wiring** — Connect `applyGatedGrowth` into `tick()` (legacy growth still active)
+| Issue | Fix |
+|-------|-----|
+| `profile.jsp` crashed with HTTP 500 on every load | Broken Java string literal in `esc()` (`` sb.append(""") ``) → fixed to `&quot;`; `session`→`sess` rename to stop shadowing the implicit session object |
+| Gated growth implemented but not wired into the game loop | `applyGatedGrowth()` now called from `tick()` on food eaten; removed `score == length` force-set; score = food mass, growth gates (1 pt ≤ 100, every 4th pt above), remainder in `growthPoints` |
+| English-only UI | New `js/i18n.js` — dependency-free EN/NE i18n (184+ keys), language toggle 🌐 EN ↔ नेपाली on lobby/game/profile, all JSPs + game.js/profile.js/ajax.js converted; idiomatic Nepali (respectful form, Devanagari, ०-९ digits), not literal translation |
+| No accessibility support | `:focus-visible` keyboard outline, `.sr-only` + `#sr-status` aria-live game announcements, `role=alert` errors, dialog roles/aria-modal, duplicate-id fixes in profile.jsp, autocomplete attrs, Devanagari font fallbacks |
+| Not installable / no offline shell | PWA: `manifest.webmanifest` + `sw.js` service worker (app-shell precache, network-first nav with offline fallback, never intercepts /api/) + icons (192/512 PNG, SVG, apple-touch) |
+| No API documentation | OpenAPI 3.0.3 spec at [docs/openapi.json](docs/openapi.json) + Swagger UI at [docs/](docs/) — 8 paths / 11 operations, 429 documented, real action names |
+| `js/` gitignore pattern hid `src/main/webapp/js/` (profile.js never committed) | `.gitignore` `js/` → `/js/`; added `/jsp/` and `/logs/` |
 
 ---
 

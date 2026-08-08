@@ -394,7 +394,11 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 - [x] Done-check: playtest with varied settings, no regressions
 
 **Phase 4 — Polish (optional)**
-- [ ] PWA/mobile polish, accessibility, i18n
+- [x] PWA/mobile polish — installable app + offline app-shell (manifest.webmanifest, sw.js, icons)
+- [x] Accessibility — keyboard focus, ARIA live regions, roles, duplicate-id fixes, Devanagari fonts
+- [x] i18n — English + Nepali (idiomatic translations, language toggle, localStorage persistence)
+- [x] OpenAPI/Swagger — docs/openapi.json + Swagger UI at /docs/
+- [x] Gated growth wiring — applyGatedGrowth() connected into tick()
 
 ---
 
@@ -495,6 +499,7 @@ Direction: the game is feature-complete; the goal is making it a deployable, pla
 - Phase 1 complete (2026-08-05): commit 0ab74eb pushed; CI Run #1 green (21/21 tests + WAR artifact); live at https://predefine-imaginary-deniable.ngrok-free.dev (Jetty + local PostgreSQL + ngrok)
 - Phase 2 complete (2026-08-08): Health endpoint, structured logging, rate limiting, security headers/CORS, graceful shutdown, **WebSocket reconnection resilience (grace period + token-based state sync)**
 - Phase 3 complete (2026-08-08): Custom room settings, spectator mode, **reconnection UX**, global leaderboard, profile management
+- Phase 4 complete (2026-08-08): PWA install + offline shell, accessibility, EN/NE i18n, OpenAPI/Swagger docs, gated-growth wiring, profile.jsp HTTP 500 fix, .gitignore js/ fix
 - Docker container run pending — virtualization disabled in BIOS (WSL2/Docker Desktop not started)
 - Git: `main`; latest commit 0ab74eb (Phase 0 + Phase 1 scaffold + docs)
 

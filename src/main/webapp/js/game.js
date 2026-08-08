@@ -158,7 +158,7 @@
             if (el) el.checked = (el.value === controlScheme);
         }
         var toggle = document.getElementById('controlSchemeToggle');
-        if (toggle) toggle.title = controlScheme === 'swipe' ? 'Swipe controls active' : 'D-Pad controls active';
+        if (toggle) toggle.title = controlScheme === 'swipe' ? I18n.t('swipeActive') : I18n.t('dpadActive');
     }
 
     function updateControlScheme(scheme) {
@@ -171,7 +171,7 @@
             document.documentElement.classList.remove('swipe-mode');
         }
         syncControlUI();
-        showToast(scheme === 'swipe' ? 'Swipe controls enabled' : 'D-Pad controls enabled');
+        showToast(scheme === 'swipe' ? I18n.t('swipeEnabled') : I18n.t('dpadEnabled'));
         adjustSize();
     }
 
@@ -186,7 +186,7 @@
         soundEnabled = !soundEnabled;
         saveSetting('snake_sound', soundEnabled ? 'true' : 'false');
         updateSoundUI();
-        showToast(soundEnabled ? 'Sound on' : 'Sound off');
+        showToast(soundEnabled ? I18n.t('soundOn') : I18n.t('soundOff'));
     }
 
     function syncSettingsUI() {
@@ -216,7 +216,7 @@
             if (elem.requestFullscreen) p = elem.requestFullscreen();
             else if (elem.webkitRequestFullscreen) { elem.webkitRequestFullscreen(); p = Promise.resolve(); }
             else if (elem.msRequestFullscreen) { elem.msRequestFullscreen(); p = Promise.resolve(); }
-            if (p && p.catch) p.catch(function() { showToast('Fullscreen unavailable'); });
+            if (p && p.catch) p.catch(function() { showToast(I18n.t('fullscreenUnavailable')); });
         } else {
             var p;
             if (doc.exitFullscreen) p = doc.exitFullscreen();
@@ -243,11 +243,11 @@
             ta.select();
             try { document.execCommand('copy'); } catch (e) {}
             document.body.removeChild(ta);
-            showToast('Room code copied: ' + roomCode);
+            showToast(I18n.t('roomCodeCopied') + ': ' + roomCode);
         }
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(roomCode).then(function() {
-                showToast('Room code copied: ' + roomCode);
+                showToast(I18n.t('roomCodeCopied') + ': ' + roomCode);
             }).catch(fallback);
         } else {
             fallback();
@@ -354,11 +354,20 @@
             document.documentElement.classList.remove('swipe-mode');
             gridCache = null;
             syncSettingsUI();
-            showToast('Local data cleared');
+            showToast(I18n.t('localDataCleared'));
         });
     }
 
     function init() {
+        // Accessible live region for screen readers: announces meaningful
+        // game-state changes (game over, countdown, waiting/ready status).
+        var srStatus = document.createElement('div');
+        srStatus.id = 'sr-status';
+        srStatus.setAttribute('aria-live', 'polite');
+        srStatus.className = 'sr-only';
+        srStatus.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;';
+        document.body.appendChild(srStatus);
+
         loadSettings();
         if (controlScheme === 'swipe') {
             document.documentElement.classList.add('swipe-mode');
@@ -387,7 +396,7 @@
                 startPingLoop();
                 requestAnimationFrame(gameLoop);
             } else {
-                alert('Failed to join: ' + ((data && data.error) || 'Unknown'));
+                alert(I18n.t('failedJoin') + ': ' + ((data && data.error) || 'Unknown'));
             }
         });
 
@@ -476,6 +485,7 @@
         ws.onopen = function() {
             console.log('WebSocket connected');
             connectionLost = false;
+            updateSrStatus();
             reconnectAttempts = 0;
             wsConnecting = false;
             if (reconnectTimer) {
@@ -512,6 +522,7 @@
             wsConnecting = false;
             wsMessageQueue.length = 0; // Clear queue on close
             connectionLost = true;
+            updateSrStatus();
             if (gameRunning) scheduleReconnect();
         };
 
@@ -778,7 +789,7 @@
         }
         if (currentRankEl) {
             setText('rankVal', rank > 0 ? '#' + rank : '-');
-            setText('mobileRank', rank > 0 ? 'Rank #' + rank : 'Rank #-');
+            setText('mobileRank', I18n.t('rank') + ' #' + (rank > 0 ? rank : '-'));
         }
     }
 
@@ -968,6 +979,8 @@
                 }
             }
         }
+
+        updateSrStatus();
     }
 
     function getInterpPositions(t) {
@@ -1064,7 +1077,7 @@
             ctx.font = '11px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
-            ctx.fillText('Reconnecting...', 6, 6);
+            ctx.fillText(I18n.t('reconnecting'), 6, 6);
         }
 
         if (!serverSnakes) {
@@ -1072,7 +1085,7 @@
             ctx.font = '20px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('Connecting...', w / 2, h / 2);
+            ctx.fillText(I18n.t('connecting'), w / 2, h / 2);
             updateScoreboard(null);
             return;
         }
@@ -1226,11 +1239,11 @@
             ctx.font = 'bold 28px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('GAME OVER', w / 2, h / 2 - 80);
+            ctx.fillText(I18n.t('gameOver'), w / 2, h / 2 - 80);
 
             ctx.fillStyle = '#aaa';
             ctx.font = '14px sans-serif';
-            ctx.fillText('Time: ' + formatTime(finalResult ? finalResult.durationMs : 0), w / 2, h / 2 - 104);
+            ctx.fillText(I18n.t('time') + ': ' + formatTime(finalResult ? finalResult.durationMs : 0), w / 2, h / 2 - 104);
 
             var rankY = h / 2 - 46;
             for (var ri = 0; ri < Math.min(sorted.length, 4); ri++) {
@@ -1246,11 +1259,11 @@
             rankY += 6;
             ctx.fillStyle = '#aaa';
             ctx.font = '15px sans-serif';
-            ctx.fillText(isMobile ? 'Tap READY to restart' : 'Press SPACE to ready up', w / 2, rankY);
+            ctx.fillText(isMobile ? I18n.t('tapReadyRestart') : I18n.t('pressSpaceReady'), w / 2, rankY);
             rankY += 24;
             if (isReady) {
                 ctx.fillStyle = '#16a34a';
-                ctx.fillText('Ready! Waiting for others...', w / 2, rankY);
+                ctx.fillText(I18n.t('readyWaiting'), w / 2, rankY);
                 rankY += 24;
             }
         } else if (!gameStarted) {
@@ -1262,21 +1275,21 @@
             ctx.textBaseline = 'middle';
             var total = serverSnakes ? serverSnakes.length : 0;
             var needed = Math.max(0, 2 - total);
-            ctx.fillText('Waiting for players...', w / 2, h / 2 - 30);
+            ctx.fillText(I18n.t('waitingForPlayers'), w / 2, h / 2 - 30);
             ctx.fillStyle = '#a8a8b3';
             ctx.font = '15px sans-serif';
-            ctx.fillText(total + ' player' + (total !== 1 ? 's' : '') + ' in room' + (needed > 0 ? ' (' + needed + ' more needed)' : ''), w / 2, h / 2 + 4);
+            ctx.fillText(total + ' ' + I18n.t('players') + ' in room' + (needed > 0 ? ' (' + needed + ' more needed)' : ''), w / 2, h / 2 + 4);
             ctx.fillStyle = '#ddd';
             ctx.font = '16px sans-serif';
-            ctx.fillText(isMobile ? 'Tap READY when ready' : 'Press SPACE when ready', w / 2, h / 2 + 38);
+            ctx.fillText(isMobile ? I18n.t('tapReadyWhenReady') : I18n.t('pressSpaceWhenReady'), w / 2, h / 2 + 38);
             // Single status line: text and color swap with ready state (never two lines)
             ctx.font = '15px sans-serif';
             if (isReady) {
                 ctx.fillStyle = '#16a34a';
-                ctx.fillText('Ready! Waiting for others...', w / 2, h / 2 + 72);
+                ctx.fillText(I18n.t('readyWaiting'), w / 2, h / 2 + 72);
             } else {
                 ctx.fillStyle = '#a8a8b3';
-                ctx.fillText('Not ready yet', w / 2, h / 2 + 72);
+                ctx.fillText(I18n.t('notReadyYet'), w / 2, h / 2 + 72);
             }
         }
     }
@@ -1326,7 +1339,7 @@
         lastScoreboardHash = hash;
 
         if (!snakes || snakes.length === 0) {
-            sb.innerHTML = '<p class="empty-msg">Waiting for players...</p>';
+            sb.innerHTML = '<p class="empty-msg">' + escHtml(I18n.t('waitingForPlayers')) + '</p>';
             return;
         }
         var sorted = snakes.slice().sort(function(a, b) { return (b.score || 0) - (a.score || 0); });
@@ -1349,6 +1362,29 @@
                 '<span class="player-score">' + (snake.score || 0) + '</span></div>';
         }
         sb.innerHTML = html;
+    }
+
+    // Screen-reader live region: announce the current overlay state in the
+    // active language (game over, countdown, waiting/ready). Only writes
+    // textContent when the text actually changes, so it is cheap to call.
+    function updateSrStatus() {
+        var el = document.getElementById('sr-status');
+        if (!el) return;
+        var text = '';
+        if (connectionLost) {
+            text = I18n.t('reconnecting');
+        } else if (!serverSnakes) {
+            text = I18n.t('connecting');
+        } else if (gameOver) {
+            text = I18n.t('gameOver');
+        } else if (countdown > 0) {
+            text = String(countdown);
+        } else if (!gameStarted) {
+            text = isReady ? I18n.t('readyWaiting') : I18n.t('waitingForPlayers');
+        }
+        if (el.textContent !== text) {
+            el.textContent = text;
+        }
     }
 
     function hexToRgba(hex, alpha) {
@@ -1662,6 +1698,17 @@
 
     window.addEventListener('popstate', function() {
         if (ws) { try { ws.close(); } catch(e) {} }
+    });
+
+    // Re-translate dynamic DOM text when the language changes. Canvas text is
+    // redrawn every frame (render() reads I18n.t each frame) so it needs no
+    // handling here — only the scoreboard, HUD rank and sr-status live region
+    // are refreshed explicitly.
+    document.addEventListener('i18nchanged', function() {
+        lastScoreboardHash = ''; // force re-render (empty-message hash is '')
+        updateScoreboard(serverSnakes);
+        if (serverSnakes) updateHud(serverSnakes);
+        updateSrStatus();
     });
 
     init();
