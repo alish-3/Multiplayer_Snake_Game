@@ -87,6 +87,7 @@
             <button class="icon-btn" id="mobileSoundBtn" title="Sound" aria-label="Toggle Sound">🔊</button>
             <button class="icon-btn" id="mobileFullscreenBtn" title="Fullscreen" aria-label="Toggle Fullscreen">⛶</button>
             <button class="icon-btn" id="mobileSettingsBtn" title="Settings" aria-label="Open Settings">⚙</button>
+            <a class="icon-btn" href="profile.jsp" title="Profile" aria-label="View Profile">👤</a>
             <a class="icon-btn leave-btn" href="index.jsp" title="Leave Room" aria-label="Leave Room">✕</a>
         </div>
     </header>
@@ -204,6 +205,10 @@
                 <div class="setting-group">
                     <h4>Data</h4>
                     <button class="btn btn-secondary" id="clearDataBtn">Clear Local Data</button>
+                </div>
+                <div class="setting-group">
+                    <h4>Account</h4>
+                    <a href="profile.jsp" class="btn btn-primary" style="width: 100%;">👤 View Profile</a>
                 </div>
             </div>
         </div>

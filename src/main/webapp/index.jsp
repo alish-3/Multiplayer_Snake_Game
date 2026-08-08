@@ -131,7 +131,10 @@
 
             <!-- Friends Mode Options (default visible) -->
             <div class="mode-options" id="friendsOptions">
-                <button class="btn btn-primary" id="createRoomBtn">Create New Room</button>
+                <div class="create-room-row">
+                    <button class="btn btn-primary" id="createRoomBtn">Create New Room</button>
+                    <button class="btn btn-secondary" id="customSettingsBtn" type="button">⚙️ Custom Settings</button>
+                </div>
 
                 <div class="lobby-actions">
                     <input type="text" id="roomCodeInput" placeholder="Room code" maxlength="10" autocomplete="off">
@@ -183,6 +186,58 @@
 
             <div class="lobby-footer">
                 <button class="btn btn-secondary" id="logoutBtn">Logout</button>
+            </div>
+        </div>
+
+        <!-- Custom Room Settings Modal -->
+        <div class="modal-overlay" id="customSettingsModal">
+            <div class="modal-content custom-settings-modal">
+                <div class="modal-header">
+                    <h3>Custom Room Settings</h3>
+                    <button class="modal-close" id="closeCustomSettingsModal" aria-label="Close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <h4>Gameplay</h4>
+                        <div class="setting-row">
+                            <label for="customGridSize">Grid Size</label>
+                            <input type="number" id="customGridSize" min="15" max="50" value="30" step="1">
+                        </div>
+                        <div class="setting-row">
+                            <label for="customTickRate">Tick Rate (ms)</label>
+                            <input type="number" id="customTickRate" min="50" max="500" value="150" step="10">
+                        </div>
+                        <div class="setting-row">
+                            <label for="customMaxPlayers">Max Players</label>
+                            <input type="number" id="customMaxPlayers" min="2" max="8" value="4" step="1">
+                        </div>
+                        <div class="setting-row">
+                            <label for="customFoodDensity">Food Density</label>
+                            <input type="number" id="customFoodDensity" min="0.5" max="3.0" value="1.0" step="0.1">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <h4>Features</h4>
+                        <div class="setting-row toggle-row">
+                            <label for="customEnableBoost">Enable Boost</label>
+                            <label class="toggle-label">
+                                <input type="checkbox" id="customEnableBoost" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row toggle-row">
+                            <label for="customEnableGoldenFood">Enable Golden Food</label>
+                            <label class="toggle-label">
+                                <input type="checkbox" id="customEnableGoldenFood" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="resetCustomSettingsBtn" type="button">Reset to Defaults</button>
+                    <button class="btn btn-primary" id="applyCustomSettingsBtn" type="button">Apply Settings</button>
+                </div>
             </div>
         </div>
 
@@ -409,7 +464,8 @@
                 document.getElementById('playerName').value = currentUser;
                 if (logoutBtn) logoutBtn.textContent = 'Back';
             } else {
-                document.getElementById('lobbyUser').innerHTML = '<span class="user-badge">✅ ' + currentUser + '</span>';
+                document.getElementById('lobbyUser').innerHTML = '<span class="user-badge">✅ ' + currentUser + '</span>' +
+                    '<a href="profile.jsp" class="icon-btn profile-btn" title="View Profile">👤</a>';
                 document.getElementById('playerName').value = currentUser;
                 if (logoutBtn) logoutBtn.textContent = 'Logout';
             }
@@ -436,12 +492,99 @@
         });
 
         // Create room (Friends mode)
+        // Custom Room Settings Modal
+        var customSettings = {
+            gridSize: 30,
+            tickRateMs: 150,
+            maxPlayers: 4,
+            foodDensity: 1.0,
+            enableBoost: true,
+            enableGoldenFood: true,
+            hasCustomSettings: false
+        };
+
+        function openCustomSettingsModal() {
+            document.getElementById('customSettingsModal').classList.add('open');
+            document.getElementById('customGridSize').value = customSettings.gridSize;
+            document.getElementById('customTickRate').value = customSettings.tickRateMs;
+            document.getElementById('customMaxPlayers').value = customSettings.maxPlayers;
+            document.getElementById('customFoodDensity').value = customSettings.foodDensity;
+            document.getElementById('customEnableBoost').checked = customSettings.enableBoost;
+            document.getElementById('customEnableGoldenFood').checked = customSettings.enableGoldenFood;
+        }
+
+        function closeCustomSettingsModal() {
+            document.getElementById('customSettingsModal').classList.remove('open');
+        }
+
+        function applyCustomSettings() {
+            customSettings.gridSize = parseInt(document.getElementById('customGridSize').value, 10);
+            customSettings.tickRateMs = parseInt(document.getElementById('customTickRate').value, 10);
+            customSettings.maxPlayers = parseInt(document.getElementById('customMaxPlayers').value, 10);
+            customSettings.foodDensity = parseFloat(document.getElementById('customFoodDensity').value);
+            customSettings.enableBoost = document.getElementById('customEnableBoost').checked;
+            customSettings.enableGoldenFood = document.getElementById('customEnableGoldenFood').checked;
+            customSettings.hasCustomSettings = true;
+            
+            if (customSettings.gridSize < 15 || customSettings.gridSize > 50) customSettings.gridSize = 30;
+            if (customSettings.tickRateMs < 50 || customSettings.tickRateMs > 500) customSettings.tickRateMs = 150;
+            if (customSettings.maxPlayers < 2 || customSettings.maxPlayers > 8) customSettings.maxPlayers = 4;
+            if (customSettings.foodDensity < 0.5 || customSettings.foodDensity > 3.0) customSettings.foodDensity = 1.0;
+            
+            closeCustomSettingsModal();
+            showError('Custom settings applied! Click "Create New Room" to create a room with these settings.', 5000);
+        }
+
+        function resetCustomSettings() {
+            customSettings.gridSize = 30;
+            customSettings.tickRateMs = 150;
+            customSettings.maxPlayers = 4;
+            customSettings.foodDensity = 1.0;
+            customSettings.enableBoost = true;
+            customSettings.enableGoldenFood = true;
+            customSettings.hasCustomSettings = false;
+            
+            document.getElementById('customGridSize').value = customSettings.gridSize;
+            document.getElementById('customTickRate').value = customSettings.tickRateMs;
+            document.getElementById('customMaxPlayers').value = customSettings.maxPlayers;
+            document.getElementById('customFoodDensity').value = customSettings.foodDensity;
+            document.getElementById('customEnableBoost').checked = customSettings.enableBoost;
+            document.getElementById('customEnableGoldenFood').checked = customSettings.enableGoldenFood;
+            
+            showError('Settings reset to defaults.', 3000);
+        }
+
+        document.getElementById('customSettingsBtn').addEventListener('click', openCustomSettingsModal);
+        document.getElementById('closeCustomSettingsModal').addEventListener('click', closeCustomSettingsModal);
+        document.getElementById('applyCustomSettingsBtn').addEventListener('click', applyCustomSettings);
+        document.getElementById('resetCustomSettingsBtn').addEventListener('click', resetCustomSettings);
+
+        document.getElementById('customSettingsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeCustomSettingsModal();
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeCustomSettingsModal();
+        });
+
+        // Create room (Friends mode)
         document.getElementById('createRoomBtn').addEventListener('click', function() {
             var btn = this;
             var name = document.getElementById('playerName').value.trim();
             if (!name) { showError('Enter your name first'); return; }
             setLoading(btn, true);
-            Ajax.post('api/room', { action: 'create', playerName: name, color: selectedColor, gameMode: 'friends' }, function(data) {
+            
+            var createData = { action: 'create', playerName: name, color: selectedColor, gameMode: 'friends' };
+            if (customSettings.hasCustomSettings) {
+                createData.gridSize = customSettings.gridSize;
+                createData.tickRateMs = customSettings.tickRateMs;
+                createData.maxPlayers = customSettings.maxPlayers;
+                createData.foodDensity = customSettings.foodDensity;
+                createData.enableBoost = customSettings.enableBoost;
+                createData.enableGoldenFood = customSettings.enableGoldenFood;
+            }
+            
+            Ajax.post('api/room', createData, function(data) {
                 setLoading(btn, false);
                 if (data.success) {
                     window.location.href = 'game.jsp?room=' + data.roomCode + '&player=' + encodeURIComponent(name) + '&color=' + encodeURIComponent(selectedColor) + '&guest=' + isGuest;
@@ -528,11 +671,11 @@
             });
         }
 
-        function showError(msg) {
+        function showError(msg, duration) {
             var el = document.getElementById('errorMsg');
             el.textContent = msg;
             el.style.display = 'block';
-            setTimeout(function() { el.style.display = 'none'; }, 3000);
+            setTimeout(function() { el.style.display = 'none'; }, duration || 3000);
         }
 
         // Enter key support for login/register

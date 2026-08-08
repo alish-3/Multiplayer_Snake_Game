@@ -1692,6 +1692,75 @@ html.swipe-mode .touch-dpad { display: none !important; }
     background: var(--accent);
 }
 
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.setting-row label {
+    font-size: 0.92em;
+    color: var(--text);
+    flex-shrink: 0;
+}
+
+.setting-row input[type="number"] {
+    flex: 1;
+    max-width: 100px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-2);
+    color: var(--text);
+    font-size: 0.92em;
+    text-align: right;
+}
+
+.setting-row input[type="number"]:focus {
+    outline: none;
+    border-color: var(--secondary);
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.toggle-row label {
+    font-size: 0.92em;
+    color: var(--text);
+    flex-shrink: 0;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.profile-btn {
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* Custom settings modal specific */
+.custom-settings-modal .setting-row {
+    margin-bottom: 14px;
+}
+
+.custom-settings-modal .toggle-row {
+    margin-bottom: 14px;
+}
+
 /* ============================================================
    5. BREAKPOINTS
    ============================================================ */
