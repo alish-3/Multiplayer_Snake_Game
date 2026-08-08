@@ -362,8 +362,8 @@ mvn test
 | Spectator mode | Watch games without playing | Low | ✅ **DONE** (SpectatorWebSocket + Room spectator support) |
 | Leaderboard | Global/historical leaderboards with pagination | Low | ✅ **DONE** (LeaderboardServlet with pagination) |
 | Custom room settings | Grid size, tick rate, max players, food density | Low | ✅ **DONE** (gridSize, tickRateMs, maxPlayers, foodDensity, enableBoost, enableGoldenFood) |
-| Gated growth wiring | `applyGatedGrowth` is implemented/tested but tick() still uses legacy immediate growth | Low | Open |
-| Accessibility | Keyboard navigation, screen reader support | Low | Open |
+| Gated growth wiring | applyGatedGrowth wired into tick() (threshold 1 ≤ score 100, threshold 4 above; remainder carried in growthPoints) | Low | ✅ **DONE** (Phase 4) |
+| Accessibility | :focus-visible keyboard outline, .sr-only + #sr-status aria-live announcements, role=alert errors, dialog roles/aria-modal, duplicate-id fixes, autocomplete attrs | Low | ✅ **DONE** (Phase 4) |
 
 ### 13.2 Roadmap — "Ship it" (2026-08-07)
 
