@@ -83,7 +83,7 @@ public class AdvancedBotManager {
         if (legal.isEmpty()) return bot.getDirection();
 
         Set<Point> occupied = collectOccupied(bot, snakes);
-        Set<Point> predictedOpponentHeads = predictOpponentHeads(bot, snakes);
+        Map<Point, Double> predictedOpponentHeads = predictOpponentHeads(bot, snakes);
 
         List<ScoredMove> scored = new ArrayList<>();
         for (String dir : legal) {
@@ -121,7 +121,7 @@ public class AdvancedBotManager {
     // Move evaluation
     // ---------------------------------------------------------------
     private static double evaluate(Snake bot, Point next, List<Snake> snakes, List<Food> foods,
-                                    Set<Point> occupied, Set<Point> predictedOpponentHeads, Difficulty diff) {
+                                    Set<Point> occupied, Map<Point, Double> predictedOpponentHeads, Difficulty diff) {
 
         // 1) Guaranteed-death filter: stepping onto an OPPONENT's body cell is
         //    instant death this tick. Our own body is NOT deadly (hybrid .io
@@ -137,8 +137,9 @@ public class AdvancedBotManager {
         //    So a "smart" bot should dodge these, not seek them, at every
         //    difficulty (scaled down a bit for easy/normal so they still
         //    occasionally blunder into one).
-        if (predictedOpponentHeads.contains(next)) {
-            score -= 700_000 * (0.35 + 0.65 * diff.safetyScale);
+        if (predictedOpponentHeads.containsKey(next)) {
+            double weight = predictedOpponentHeads.get(next);
+            score -= 700_000 * weight * (0.35 + 0.65 * diff.safetyScale);
         }
 
         // 3) Survival - flood-fill reachable space after this move.
@@ -156,12 +157,49 @@ public class AdvancedBotManager {
         }
         score += Math.min(mySpace, 150) * 12;
 
-        // 4) Food.
-        Food nearestFood = nearestFood(next, foods);
-        if (nearestFood != null) {
-            int d = manhattan(next, nearestFood.getX(), nearestFood.getY());
-            score += (400.0 / (d + 1)) * diff.foodWeight * nearestFood.getValue();
-            if (d == 0) score += 6000 * diff.foodWeight;
+        // 4) Food - spread out instead of every bot racing for the same
+        //    pellet. A food the bot is closest to (compared to every other
+        //    alive snake) is "claimed" and worth far more than a food some
+        //    other bot can reach sooner.
+        if (foods != null) {
+            for (Food f : foods) {
+                int myDist = manhattan(next, f.getX(), f.getY());
+                boolean claimed = true;
+                for (Snake other : snakes) {
+                    if (other == bot || !other.isAlive()) continue;
+                    Point otherHead = other.getHead();
+                    if (otherHead == null) continue;
+                    if (manhattan(otherHead, f.getX(), f.getY()) < myDist) {
+                        claimed = false;
+                        break;
+                    }
+                }
+                score += (claimed ? 2000.0 : 120.0) * diff.foodWeight * f.getValue() / (myDist + 1.0);
+                if (myDist == 0) score += 6000 * diff.foodWeight;
+            }
+        }
+
+        // 4b) Crowding / body-density penalty (multi-opponent games only).
+        //     Sitting next to a pile of opponent heads and bodies is exactly
+        //     how FFA bots ball up and mutually kill. Push toward open space;
+        //     this is left out of 1v1 so the bot can still close in and hunt.
+        if (countAliveOpponents(bot, snakes) >= 2) {
+            int crowd = 0;
+            for (Snake other : snakes) {
+                if (other == bot || !other.isAlive()) continue;
+                for (Point seg : other.getSegments()) {
+                    if (chebyshev(next, seg) <= 2) crowd++;
+                }
+            }
+            score -= crowd * crowd * 8_000 * diff.safetyScale;
+
+            for (Snake other : snakes) {
+                if (other == bot || !other.isAlive()) continue;
+                Point otherHead = other.getHead();
+                if (otherHead == null) continue;
+                int headDist = manhattan(next, otherHead.getX(), otherHead.getY());
+                if (headDist <= 3) score -= 15_000 * diff.safetyScale * (4 - headDist);
+            }
         }
 
         // 5) Hunting / cutting off opponents (hard & impossible only).
@@ -189,6 +227,15 @@ public class AdvancedBotManager {
         double bonus = 0;
         int myLen = bot.getSegments().size();
 
+        int nOpp = 0;
+        for (Snake s : snakes) {
+            if (s != bot && s.isAlive()) nOpp++;
+        }
+        // In a 4-player FFA every bot walling in every other bot is exactly
+        // how they converge and mutually kill, so hunting is dangerous. In
+        // 1v1 it is a strong, safe tactic - keep it at full strength there.
+        boolean crowd = nOpp >= 2;
+
         for (Snake opp : snakes) {
             if (opp == bot || !opp.isAlive()) continue;
             Point oppHead = opp.getHead();
@@ -196,6 +243,25 @@ public class AdvancedBotManager {
 
             int distToOpp = manhattan(myNext, oppHead.getX(), oppHead.getY());
             if (distToOpp > 9) continue; // only worth planning against nearby threats
+
+            if (crowd) {
+                // Never try to cut off a bigger snake in a crowd - it can
+                // simply outlast us while a third party picks us off.
+                if (opp.getSegments().size() > myLen) continue;
+                // Skipping entirely while any other opponent lurks nearby:
+                // walling in one snake when another one watches is suicide.
+                boolean thirdNearby = false;
+                for (Snake other : snakes) {
+                    if (other == bot || other == opp || !other.isAlive()) continue;
+                    Point otherHead = other.getHead();
+                    if (otherHead == null) continue;
+                    if (manhattan(myNext, otherHead.getX(), otherHead.getY()) <= 6) {
+                        thirdNearby = true;
+                        break;
+                    }
+                }
+                if (thirdNearby) continue;
+            }
 
             Set<Point> before = new HashSet<>(occupied);
             int oppSpaceBefore = floodFill(oppHead, before, 200);
@@ -216,6 +282,7 @@ public class AdvancedBotManager {
                 bonus += 3500;
             }
         }
+        if (crowd) bonus *= 0.25;
         return bonus;
     }
 
@@ -280,15 +347,29 @@ public class AdvancedBotManager {
         return occupied;
     }
 
-    /** Light 1-tick prediction: assume each opponent keeps its current heading. */
-    private static Set<Point> predictOpponentHeads(Snake bot, List<Snake> snakes) {
-        Set<Point> predicted = new HashSet<>();
+    /**
+     * 3-tick opponent head prediction: assume each opponent keeps its current
+     * heading (and stays alive) and return where its head will be 1, 2 and 3
+     * ticks from now. Weights decay with distance - a head-on two cells away
+     * is nearly certain, three cells away is a maybe. This lets the bot dodge
+     * 2-cell head-on runs that a single-tick prediction only sees at the very
+     * last moment. If a predicted cell is shared by several ticks the earliest
+     * (most certain) prediction wins.
+     */
+    private static Map<Point, Double> predictOpponentHeads(Snake bot, List<Snake> snakes) {
+        Map<Point, Double> predicted = new HashMap<>();
+        double[] weights = {1.0, 0.6, 0.35};
         for (Snake s : snakes) {
             if (s == bot || !s.isAlive()) continue;
             Point head = s.getHead();
             if (head == null) continue;
-            Point next = step(head, s.getDirection());
-            if (next != null) predicted.add(next);
+            Point cursor = head;
+            for (double w : weights) {
+                Point next = step(cursor, s.getDirection());
+                if (next == null || isWall(next)) break; // opponent dies first
+                predicted.putIfAbsent(next, w);
+                cursor = next;
+            }
         }
         return predicted;
     }
@@ -323,15 +404,16 @@ public class AdvancedBotManager {
         return Math.abs(p.getX() - x) + Math.abs(p.getY() - y);
     }
 
-    private static Food nearestFood(Point p, List<Food> foods) {
-        if (foods == null || foods.isEmpty()) return null;
-        Food nearest = null;
-        int best = Integer.MAX_VALUE;
-        for (Food f : foods) {
-            int d = manhattan(p, f.getX(), f.getY());
-            if (d < best) { best = d; nearest = f; }
+    private static int chebyshev(Point a, Point b) {
+        return Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getY() - b.getY()));
+    }
+
+    private static int countAliveOpponents(Snake bot, List<Snake> snakes) {
+        int n = 0;
+        for (Snake s : snakes) {
+            if (s != bot && s.isAlive()) n++;
         }
-        return nearest;
+        return n;
     }
 
     private static class ScoredMove {

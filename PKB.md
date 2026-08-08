@@ -63,7 +63,7 @@ src/main/java/com/snake/game/
 | **LeaderboardServlet** | `/api/leaderboard` endpoint with global leaderboard, pagination, and filtering |
 | **DatabaseManager** | PostgreSQL operations; `players` table auto-created on startup; bcrypt hashing; validates env config |
 | **JwtUtil** | HS256 JWT creation/validation for remember-me tokens |
-| **BotManager / AdvancedBotManager** | Server-side AI players; v2 uses flood-fill survival + opponent-aware hunting with per-difficulty personalities |
+| **BotManager / AdvancedBotManager** | Server-side AI players; v2 uses flood-fill survival + opponent-aware hunting with per-difficulty personalities; 2026-08-08: multi-tick (3-step) head prediction, crowding/body-density penalty, food-claim spreading, FFA-scaled hunting (fixes bot-vs-bot deaths in 4-player impossible games; 1v1 unchanged) |
 | **SecurityFilter** | Rate limiting (token bucket per IP), input validation, security headers (CSP, HSTS, X-Frame-Options, etc.), CORS configuration |
 | **RateLimiter** | Token bucket implementation for API rate limiting |
 | **GameLogger** | Structured logging for engine events, deaths, room lifecycle, and connection metrics |
@@ -344,7 +344,7 @@ mvn test
 
 ### 12.3 Server-side AI bots (Java)
 
-`AdvancedBotManager` runs server-side bots with flood-fill survival + opponent-aware hunting, per-difficulty personalities.
+`AdvancedBotManager` runs server-side bots with flood-fill survival + opponent-aware hunting, per-difficulty personalities. In 2026-08-08 the bot was upgraded for FFA safety: 3-tick opponent head prediction, crowding penalties (Chebyshev-2 bodies, Manhattan-3 heads) active only with 2+ opponents, food-claim spreading to prevent same-pellet races, and hunting dampened to 0.25x against same/larger targets when 3+ snakes are alive. Live-verified: 4-player impossible games no longer end in mutual bot deaths (~tick 58 → 234+ and still 3/4 alive); 1v1 impossible play unchanged.
 
 ### 12.4 Media assets (`media/`)
 

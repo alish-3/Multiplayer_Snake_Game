@@ -41,7 +41,7 @@
 
 ### Advanced Gameplay
 - **Hybrid IO Rules** — Walk your own body allowed; head‑ons kill both snakes; other snakes' bodies are lethal
-- **Smart AI Bots** — Server-side bots with flood-fill survival + opponent-aware hunting; PowerShell launchers for testing
+- **Smart AI Bots** — Server-side bots with flood-fill survival + opponent-aware hunting; multi-tick collision lookahead, crowding/spacing awareness, food-claim spreading, and FFA-scaled hunting so bots play well 1v1 AND survive crowded 4-player matches
 - **Global Leaderboard** — Paginated rankings by high score, total score, or total games
 - **Cross-Platform** — Desktop, mobile, touch‑and‑gesture controls
 
